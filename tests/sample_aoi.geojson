@@ -1,0 +1,23 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Delhi Cantonment AOI Sample"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.1000, 28.5800],
+            [77.1500, 28.5800],
+            [77.1500, 28.6200],
+            [77.1000, 28.6200],
+            [77.1000, 28.5800]
+          ]
+        ]
+      }
+    }
+  ]
+}

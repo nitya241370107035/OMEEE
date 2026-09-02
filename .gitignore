@@ -1,0 +1,36 @@
+# Satellite imagery, tiles, and thumbnails
+*.tif
+*.tiff
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.jp2
+*.bmp
+*.npy
+*.npz
+data/tiles/
+
+# Python cache & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments & virtualenvs
+.env
+.env.local
+.venv/
+venv/
+ENV/
+env/
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
