@@ -20,10 +20,23 @@ data/cache/
 !data/README.md
 !data/custom_aoi.geojson
 
-# 2. Reference & External Repositories
+# 2. Model Checkpoints & Large Weights (>100MB)
+models/retrieval/*.pt
+models/retrieval/*.bin
+models/retrieval/*.safetensors
+models/retrieval/*.onnx
+*.pt
+*.bin
+*.safetensors
+*.onnx
+*.weights
+*.h5
+*.pkl
+
+# 3. Reference & External Repositories
 SIH2026/
 
-# 3. Python Cache, Bytecode & Testing Artifacts
+# 4. Python Cache, Bytecode & Testing Artifacts
 __pycache__/
 *.py[cod]
 *$py.class
@@ -34,7 +47,7 @@ htmlcov/
 .tox/
 .nox/
 
-# 4. Virtual Environments
+# 5. Virtual Environments
 .env
 .env.*
 !.env.example
@@ -43,7 +56,7 @@ venv/
 ENV/
 env/
 
-# 5. IDE, OS & System Generated Logs
+# 6. IDE, OS & System Generated Logs
 .vscode/
 .idea/
 .DS_Store
@@ -52,7 +65,7 @@ Thumbs.db
 scratch/
 .system_generated/
 
-# 6. Archives & Compressed Dumps
+# 7. Archives & Compressed Dumps
 *.zip
 *.tar
 *.tar.gz
