@@ -56,7 +56,7 @@ services:
   backend:
     build:
       context: ..
-      dockerfile: Dockerfile
+      dockerfile: infra/docker/Dockerfile
     container_name: eo_backend
     restart: unless-stopped
     depends_on:

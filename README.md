@@ -135,11 +135,11 @@ cp .env.example .env
 
 ### 2. Launch Full Docker Stack
 ```bash
-# Launch from root directory
-docker compose up -d --build
-
-# Or explicitly specifying the infra compose configuration
+# Launch the multi-container stack via infra compose
 docker compose -f infra/docker-compose.yml up -d --build
+
+# Or navigate to infra/ and start
+cd infra && docker compose up -d --build
 ```
 
 ### 3. Service Access Endpoints
@@ -211,8 +211,6 @@ pytest tests/ -v
 ├── README.md                               # Primary project documentation
 ├── PROVENANCE.md                           # Official Data & Model Lineage Audit Log
 ├── IngestionPipelin.md                     # Ingestion architecture specification
-├── Dockerfile                              # Multi-stage Dockerfile with GDAL, PyTorch & dependencies
-├── docker-compose.yml                      # Full-stack Docker orchestration
 ├── requirements.txt                        # Python dependencies
 ├── .env.example                            # Configuration environment variables template
 ├── backend/                                # Python FastAPI services, ML models & ingestion
@@ -241,8 +239,12 @@ pytest tests/ -v
 │   ├── index.html                          # Leaflet map UI with multi-view navigation
 │   ├── index.css                           # Glassmorphic dark aerospace styling
 │   └── app.js                              # Map logic, AOI draw tools & progress tracking
-├── infra/                                  # Infrastructure configuration
-│   └── docker/                             # Docker entrypoints & startup healthcheck scripts
+├── infra/                                  # Infrastructure & Container Orchestration
+│   ├── docker-compose.yml                  # Full-stack Multi-Container Docker Compose configuration
+│   ├── docker/                             # Docker container specification
+│   │   ├── Dockerfile                      # Geospatial container specification with GDAL, PyTorch
+│   │   └── entrypoint.sh                   # Automated database migration & startup entrypoint
+│   └── scripts/                            # Offline staging scripts
 ├── models/                                 # Pretrained model weights (RemoteCLIP ViT-B-32)
 ├── data/                                   # Local archive storage (tiles, custom AOIs)
 └── tests/                                  # Automated unit & integration test suite
