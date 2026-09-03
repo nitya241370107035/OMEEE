@@ -31,10 +31,8 @@ For every ingested component, the following metadata fields are tracked:
 | **Qdrant Vector Database** | Vector Search Engine (512-dim Cosine) | [Qdrant Repository](https://github.com/qdrant/qdrant) | Apache 2.0 | Docker (`eo_qdrant:6333`) | **In-Use** 🟢 |
 | **PostgreSQL 16 + PostGIS 3.4** | Sovereign Spatial Database | [PostGIS Official](https://postgis.net/) | GPL v2 | Docker (`eo_postgres:5434`) | **In-Use** 🟢 |
 | **MinIO S3 Object Store** | S3-Compatible Local Object Store | [MinIO Official](https://min.io/) | AGPL v3.0 | Docker (`eo_minio:9000`) | **In-Use** 🟢 |
-| **OpenCLIP Framework** | Vision-Language Model Library | [OpenCLIP Torch](https://github.com/mlfoundations/open_clip) | MIT License | Python dependency | **In-Use** 🟢 |
-| **Leaflet & Esri World Imagery** | Interactive Geospatial Web Map | [Leaflet](https://leafletjs.com/) / Esri ArcGIS | BSD-2-Clause / Open Map Data | `frontend/` Web UI | **In-Use** 🟢 |
-| **LEVIR-CD / OSCD** | Bi-Temporal Change Detection Datasets | LEVIR-CD & IEEE DataPort | CC BY 4.0 / CC BY-SA 4.0 | `data/training/` | **Planned** ⏳ |
-| **RSICD Remote Sensing Captions** | Multi-Modal Caption Dataset | GitHub / RSICD | Open Access | `data/training/` | **Planned** ⏳ |
+| **Leaflet & Esri World Imagery** | Interactive Geospatial Web Map | [Leaflet](https://leafletjs.com/) / Esri ArcGIS | BSD-2-Clause / Open Map Data | `frontend/` Web UI | 
+
 
 ---
 
