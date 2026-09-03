@@ -135,8 +135,11 @@ cp .env.example .env
 
 ### 2. Launch Full Docker Stack
 ```bash
-# Build and run all services in background
+# Launch from root directory
 docker compose up -d --build
+
+# Or explicitly specifying the infra compose configuration
+docker compose -f infra/docker-compose.yml up -d --build
 ```
 
 ### 3. Service Access Endpoints
