@@ -133,7 +133,21 @@ cd SIH-2026-PS26227-Semantic-Retrieval-and-Multi-Temporal-Analysis-
 cp .env.example .env
 ```
 
-### 2. Launch Full Docker Stack
+### 2. Download Pretrained RemoteCLIP Weights
+Download the pre-trained `RemoteCLIP-ViT-B-32.pt` weights (~605 MB) and place them inside the `models/retrieval/` directory:
+
+- **HuggingFace Repository**: [chendelong/RemoteCLIP](https://huggingface.co/chendelong/RemoteCLIP)
+- **Direct Checkpoint Download**: [RemoteCLIP-ViT-B-32.pt](https://huggingface.co/chendelong/RemoteCLIP/resolve/main/RemoteCLIP-ViT-B-32.pt)
+
+```bash
+# Create models directory (if not exists)
+mkdir -p models/retrieval
+
+# Download using curl (Linux / macOS / PowerShell)
+curl -L -o models/retrieval/RemoteCLIP-ViT-B-32.pt "https://huggingface.co/chendelong/RemoteCLIP/resolve/main/RemoteCLIP-ViT-B-32.pt"
+```
+
+### 3. Launch Full Docker Stack
 ```bash
 # Launch the multi-container stack via infra compose
 docker compose -f infra/docker-compose.yml up -d --build
@@ -142,7 +156,7 @@ docker compose -f infra/docker-compose.yml up -d --build
 cd infra && docker compose up -d --build
 ```
 
-### 3. Service Access Endpoints
+### 4. Service Access Endpoints
 
 | Service | Access URL | Port | Description |
 |---|---|---|---|
@@ -152,7 +166,7 @@ cd infra && docker compose up -d --build
 | **PostgreSQL / PostGIS** | `localhost:5434` | `5434` (mapped from 5432) | Database: `eo_archive`, User: `eo_admin`, Pass: `eo_password` |
 | **MinIO S3 Web Console** | [http://localhost:9001](http://localhost:9001) | `9001` | Object Storage Console (User: `eo_admin`, Pass: `eo_password`) |
 
-### 4. Run Automated Test Suite
+### 5. Run Automated Test Suite
 ```bash
 # Run tests inside the running container
 docker exec -it eo_backend pytest tests/ -v
