@@ -31,7 +31,7 @@ from backend.ingestion.stac_search import search_stac_scene, STACSceneMetadata
 from backend.ingestion.canvas import assemble_working_canvas, CanvasData
 from backend.ingestion.masking import clean_and_normalize_canvas, CleanedCanvas
 from backend.ingestion.tiler import slice_and_filter_tiles, TileCandidate, DEFAULT_GROUND_CROP_SIZE
-from backend.ingestion.storage import save_tiles_and_manifest
+from backend.ingestion.storage import save_tiles_and_manifest, save_intermediate_masks
 
 # Configure logging
 logging.basicConfig(
@@ -129,14 +129,31 @@ def run_aoi_pipeline(
     )
 
     # ---------------------------------------------------------
-    # Phase 1.3: Cloud/shadow masking & radiometric normalization
+    # Phase 2: Cloud/shadow masking & radiometric normalization
     # ---------------------------------------------------------
-    logger.info("[Phase 1.3] Executing spectral cloud/shadow masking and masked percentile normalization...")
+    logger.info("[Phase 2] Executing s2cloudless cloud detection, shadow adapter, and masked percentile normalization...")
     cleaned = clean_and_normalize_canvas(canvas)
     logger.info(
-        f"[Phase 1.3] Masking & Normalization complete: "
+        f"[Phase 2] Masking & Normalization complete: "
         f"Cloud/Shadow={cleaned.canvas_cloud_pct * 100:.2f}%, "
         f"Good={((1.0 - cleaned.canvas_cloud_pct) * 100):.2f}%"
+    )
+
+    # ---------------------------------------------------------
+    # Phase 2.6: Preserve Intermediate Cloud Detection Outputs
+    # ---------------------------------------------------------
+    logger.info(f"[Phase 2.6] Preserving intermediate cloud probability and mask GeoTIFFs...")
+    save_intermediate_masks(
+        scene_id=scene_meta.scene_id,
+        cloud_prob=cleaned.cloud_prob,
+        cloud_mask=cleaned.cloud_mask,
+        transform=canvas.transform,
+        crs=canvas.crs,
+        shadow_mask=cleaned.shadow_mask,
+        bad_mask=cleaned.bad_mask,
+        normalized_canvas=cleaned.rgb_normalized,
+        raw_canvas=canvas.data,
+        base_data_dir=Path(base_data_dir)
     )
 
     # ---------------------------------------------------------

@@ -187,3 +187,155 @@ def save_tiles_and_manifest(
     )
 
     return manifest_path
+
+
+def save_intermediate_masks(
+    scene_id: str,
+    cloud_prob: np.ndarray,
+    cloud_mask: np.ndarray,
+    transform: rasterio.Affine,
+    crs: str = "EPSG:4326",
+    shadow_mask: Optional[np.ndarray] = None,
+    bad_mask: Optional[np.ndarray] = None,
+    normalized_canvas: Optional[np.ndarray] = None,
+    raw_canvas: Optional[np.ndarray] = None,
+    base_data_dir: Path = DEFAULT_DATA_DIR,
+    output_subdir_name: Optional[str] = None
+) -> Dict[str, Path]:
+    """
+    Saves intermediate cloud detection and normalized outputs as georeferenced GeoTIFFs under
+    data/intermediate/{scene_id}/ (or custom subdir) for debugging, quality audit, and research reproducibility.
+
+    Args:
+        scene_id: Satellite scene identifier.
+        cloud_prob: 2D float32 cloud probability map [0.0, 1.0].
+        cloud_mask: 2D boolean cloud mask.
+        transform: Affine geotransform.
+        crs: Coordinate reference system (default 'EPSG:4326').
+        shadow_mask: Optional 2D boolean shadow mask.
+        bad_mask: Optional 2D boolean combined mask.
+        normalized_canvas: Optional 3D (3, H, W) uint8 RGB normalized canvas.
+        raw_canvas: Optional 3D (Bands, H, W) float32/uint16 raw canvas.
+        base_data_dir: Root storage path.
+        output_subdir_name: Optional custom directory name (e.g. 'scene_2017', 'scene_2023').
+
+    Returns:
+        Dict[str, Path]: Mapping of output artifact names to their saved file paths.
+    """
+    folder_name = output_subdir_name if output_subdir_name else scene_id
+    inter_dir = Path(base_data_dir) / "intermediate" / folder_name
+    inter_dir.mkdir(parents=True, exist_ok=True)
+
+    height, width = cloud_mask.shape
+    saved_paths: Dict[str, Path] = {}
+
+    # 1. Cloud Probability Map (float32 [0.0, 1.0])
+    prob_path = inter_dir / "cloud_probability.tif"
+    with rasterio.open(
+        prob_path,
+        "w",
+        driver="GTiff",
+        height=height,
+        width=width,
+        count=1,
+        dtype=np.float32,
+        crs=CRS.from_string(crs),
+        transform=transform,
+        compress="lzw"
+    ) as dst:
+        dst.write(cloud_prob.astype(np.float32), 1)
+    saved_paths["cloud_probability"] = prob_path
+
+    # 2. Binary Cloud Mask (uint8: 0 or 1)
+    mask_path = inter_dir / "cloud_mask.tif"
+    with rasterio.open(
+        mask_path,
+        "w",
+        driver="GTiff",
+        height=height,
+        width=width,
+        count=1,
+        dtype=np.uint8,
+        crs=CRS.from_string(crs),
+        transform=transform,
+        compress="lzw"
+    ) as dst:
+        dst.write(cloud_mask.astype(np.uint8), 1)
+    saved_paths["cloud_mask"] = mask_path
+
+    # 3. Shadow Mask (uint8: 0 or 1)
+    if shadow_mask is not None:
+        shadow_path = inter_dir / "shadow_mask.tif"
+        with rasterio.open(
+            shadow_path,
+            "w",
+            driver="GTiff",
+            height=height,
+            width=width,
+            count=1,
+            dtype=np.uint8,
+            crs=CRS.from_string(crs),
+            transform=transform,
+            compress="lzw"
+        ) as dst:
+            dst.write(shadow_mask.astype(np.uint8), 1)
+        saved_paths["shadow_mask"] = shadow_path
+
+    # 4. Optional Combined Bad Mask (uint8: 0 or 1)
+    if bad_mask is not None:
+        bad_path = inter_dir / "bad_mask.tif"
+        with rasterio.open(
+            bad_path,
+            "w",
+            driver="GTiff",
+            height=height,
+            width=width,
+            count=1,
+            dtype=np.uint8,
+            crs=CRS.from_string(crs),
+            transform=transform,
+            compress="lzw"
+        ) as dst:
+            dst.write(bad_mask.astype(np.uint8), 1)
+        saved_paths["bad_mask"] = bad_path
+
+    # 5. Normalized Canvas (3-band uint8 RGB [0, 255])
+    if normalized_canvas is not None:
+        norm_path = inter_dir / "normalized_canvas.tif"
+        n_bands = normalized_canvas.shape[0]
+        with rasterio.open(
+            norm_path,
+            "w",
+            driver="GTiff",
+            height=height,
+            width=width,
+            count=n_bands,
+            dtype=np.uint8,
+            crs=CRS.from_string(crs),
+            transform=transform,
+            compress="lzw"
+        ) as dst:
+            dst.write(normalized_canvas.astype(np.uint8))
+        saved_paths["normalized_canvas"] = norm_path
+
+    # 6. Raw Canvas (RGB or multiband)
+    if raw_canvas is not None:
+        raw_path = inter_dir / "raw_canvas.tif"
+        r_bands = min(3, raw_canvas.shape[0])
+        with rasterio.open(
+            raw_path,
+            "w",
+            driver="GTiff",
+            height=height,
+            width=width,
+            count=r_bands,
+            dtype=np.float32,
+            crs=CRS.from_string(crs),
+            transform=transform,
+            compress="lzw"
+        ) as dst:
+            dst.write(raw_canvas[:r_bands].astype(np.float32))
+        saved_paths["raw_canvas"] = raw_path
+
+    logger.info(f"Intermediate quality GeoTIFFs saved to: {inter_dir}")
+    return saved_paths

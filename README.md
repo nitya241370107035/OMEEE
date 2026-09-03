@@ -15,118 +15,121 @@ This platform provides an end-to-end, **100% on-premises, network-isolated solut
 
 ---
 
-## 🏗️ System Architecture & Storage Strategy
+## 🛰️ Project Pipeline Architecture
 
-The system enforces a strict separation between ingestion-time heavy precomputation and query-time rapid resolution:
-
-```
-                            +---------------------------------+
-                            |   Analyst Web Application UI    |
-                            |   (React + Leaflet + Geoman)    |
-                            +----------------+----------------+
-                                             | REST (/api/v1/...)
-                            +----------------v----------------+
-                            |     FastAPI Backend Service     |
-                            |      Intent Router Agent        |
-                            +----+-----------+-----------+----+
-                                 |           |           |
-            +--------------------+           |           +--------------------+
-            | Vector Queries                 | Spatial SQL Queries            | Tile Streaming
-    +-------v-------+                +-------v-------+                +-------v-------+
-    |   Qdrant DB   |                |  PostgreSQL / |                |  Local Files /|
-    | (Embeddings & |                |    PostGIS    |                | TiTiler COGs  |
-    |  Clusters)    |                | (Meta & Cache)|                | MinIO Storage |
-    +---------------+                +---------------+                +---------------+
-```
-
-### Three Storage Layers
-1. **Vector DB (Qdrant)**: Stores 512-dim RemoteCLIP embeddings for text-to-image search, image-to-image search, and HDBSCAN cluster IDs.
-2. **Relational & Spatial DB (PostgreSQL + PostGIS)**: Stores scene/tile metadata, spatial boundaries (`GEOMETRY(Polygon, 4326)`), precomputed change events, analyst review decisions, and export audit logs.
-3. **File/Object Storage (MinIO / Local)**: Holds raw Earth Observation imagery and preprocessed Cloud-Optimized GeoTIFFs (COGs).
-
----
-
-## 📁 Repository Directory Structure
-
-```
-.
-├── ProjectContext.md                       # Single source of truth for project requirements & schema
-├── README.md                               # Primary project guide & repository documentation
-├── PROVENANCE.md                           # Data & model provenance tracking audit log
-├── .env.example                            # Configuration environment variables template
-├── docs/                                   # Architectural notes & evaluation benchmark harness reports
-├── data/                                   # Git-ignored data staging (raw imagery, 512x512 tiles, training sets)
-├── models/                                 # Git-ignored local model weights (RemoteCLIP, Change Detection)
-├── backend/                                # Python FastAPI services, ingestion scripts, & ML models
-│   ├── api/                                # REST API routers & Intent Routing Agent
-│   │   ├── routers/                        # Endpoints (/api/v1/search, /change, /discover, /queue, /export)
-│   │   └── agent/                          # Query classifier & tools (vector search, spatial lookup, change resolver)
-│   ├── db/                                 # PostGIS SQLAlchemy models, schema.sql, seed.sql, vector_schema.py
-│   ├── services/                           # Qdrant client wrapper, analyst reranker, quality filtering
-│   ├── ingestion/                          # Preprocessing, cloud masking, co-registration, embedding & change inference
-│   ├── training/                           # Offline fine-tuning scripts (RemoteCLIP & Siamese change models)
-│   └── evaluation/                         # Automated precision/recall/F1 & latency benchmarking suite
-├── frontend/                               # React + Vite + Leaflet mapping web application
-│   └── src/
-│       ├── components/                     # MapView, AOIDrawTool, SearchBar, ResultsGrid, ReviewQueue, LocationDetail
-│       ├── pages/                          # Intelligence dashboard & analyst workspace views
-│       └── api/                            # REST API client layer
-└── infra/                                  # Infrastructure docker-compose & offline staging scripts
-    ├── docker-compose.yml                  # Container orchestration for PostGIS, Qdrant, MinIO
-    ├── docker/                             # Placeholder directory for application Dockerfiles
-    └── scripts/                            # Offline dependency staging & network-isolated testing scripts
+```text
+Raw Sentinel-2 Scene / AOI Polygon (Hyderabad & Eastern Ladakh LAC)
+        ↓ [Phase 1]
+STAC Scene Search & 10-Band Canvas Assembly (EPSG:4326)
+        ↓ [Phase 2]
+s2cloudless Machine Learning Cloud Probability (0.0 to 1.0)
+        ↓
+Spectral & Directional Cloud / Shadow Masking
+        ↓
+Combined Bad-Pixel Quality Mask
+        ↓
+Mask-Aware Percentile Radiometric Normalization (2nd–98.5th Percentile)
+        ↓ [Phase 5]
+Cloud-Matting Surface Reflectance Recovery (Clear vs Thin vs Thick Cloud)
+        ↓
+Reconstruction / Provenance Mask (0=Observed, 1=Recovered, 3=Unresolved)
+        ↓
+Strict 512 × 512 Ground Tile Slicing & Quality Gating
+        ↓ [Phase 3]
+Dataset Registry & Multi-Epoch Manifest Packaging
+        ↓
+Streamlit Defense Intelligence Mini UI/UX & QGIS Inspection
 ```
 
 ---
 
-## 🔌 API Route Specification (`/api/v1`)
+## 📋 Preprocessing Phases Overview
 
-All backend services are version-controlled under the `/api/v1` base route prefix:
+### Phase 0 — Foundation & Isolated Infrastructure
+* Modular Docker Compose stack orchestrating local PostGIS 15+, Qdrant Vector DB, and MinIO storage.
+* SQL schemas establishing strict spatial indices (`GEOMETRY(Polygon, 4326)`), audit lineage, and analyst decision logs.
 
-| Endpoint | Method | Input | Description |
-|---|---|---|---|
-| `/api/v1/search` | `POST` | Text query or image file | Performs semantic vector similarity search via Qdrant & RemoteCLIP |
-| `/api/v1/change` | `POST` | AOI GeoJSON + Date Range | Evaluates spatial tile intersections & fetches precomputed/live change events |
-| `/api/v1/discover/{tile_id}` | `GET` | `tile_id` string | Retrieves pre-clustered HDBSCAN tile members for discovery |
-| `/api/v1/queue` | `GET / POST` | Analyst Decision payload | Manages review queue items and logs confirm/reject decisions |
-| `/api/v1/export` | `POST` | Export format + item IDs | Generates exportable evidence reports carrying full provenance lineage |
+### Phase 1 — AOI to Satellite Tiles (Hyderabad Baseline)
+* Validates arbitrary GeoJSON polygons (e.g., [`data/custom_aoi.geojson`](data/custom_aoi.geojson)).
+* Queries Microsoft Planetary Computer / AWS STAC catalogs with deterministic offline fallback.
+* Assembles calibrated 10-band canvas and slices strict $512 	imes 512$ GeoTIFF tiles with exact polygon filtering.
+
+### Phase 2 — Cloud Masking, Shadow Masking & Normalization
+* **s2cloudless Integration**: Evaluates pixel-wise cloud probability across all 10 Sentinel-2 bands using trained gradient-boosted trees.
+* **Directional Shadow Detection**: Casts cloud neighborhood rays and thresholds NIR dips to identify cloud shadows.
+* **Combined Bad-Pixel Mask**: Unifies clouds and shadows into a single binary gating mask.
+* **Mask-Aware Percentile Normalization**: Radiometrically stretches valid pixels between 2nd and 98.5th percentiles with gamma correction ($\gamma=0.85$), strictly excluding bad/cloud pixels from statistics calculation to prevent dynamic range skew.
+
+### Phase 3 — Dataset Architecture, Registry & Mini UI/UX
+* **Multi-Domain Dataset Registry**: Segmented catalog supporting Eastern Ladakh LAC sectors (Pangong Tso, Galwan Valley) and maritime anchorage zones.
+* **GeoTIFF Inspection Engine**: Headless raster readers extracting exact dimensions, band counts, CRS, bounds, and NoData ratios.
+* **Streamlit Defense Mini UI/UX**: Unified dashboard (`ui/geotiff_preview.py`) displaying multi-epoch operational timelines, 8-layer mask breakdowns, strict 512 tile validation, and deep raster inspection.
+
+### Phase 5 — Cloud Removal / De-Clouding & Output Validation
+* **Methodology**: Cloud-matting-inspired physical surface recovery (reference: DOI `10.3390/rs15040904`).
+* **Region Classification**: Discretizes scene into `CLEAR` ($<0.20$ prob), `THIN_CLOUD` ($0.20-0.45$), `UNCERTAIN_CLOUD` ($0.45-0.70$), and `THICK_CLOUD` ($>0.70$).
+* **Trimap & Opacity**: Produces discrete trimap and continuous alpha opacity $lpha \in [0.0, 1.0]$.
+* **Surface Recovery**: Recovers underlying surface reflectance for thin transparent clouds via matting equations while preserving original observed pixels with **zero distortion** ($	ext{MAE} = 0.000000$).
+* **Explicit Provenance Mask**: Retains pixel-level audit trail:
+  * `Class 0 = OBSERVED_CLEAR` (genuine observed satellite measurement)
+  * `Class 1 = THIN_CLOUD_CORRECTED` (matting recovered reflectance)
+  * `Class 2 = THICK_CLOUD_RECONSTRUCTED` (reserved for temporal/model synthesis)
+  * `Class 3 = UNRESOLVED_CLOUD` (opaque cloud masked without hallucinating data)
+  * `Class 4 = NODATA`
 
 ---
 
-## Quickstart Guide (Local Infrastructure) - To launch the containers and use local Db & vector DB use this
+## 🚀 Quickstart & Execution Guide
 
-### 1. Environment Preparation
+### 1. Environment Installation
 ```bash
 # Clone the repository
-git clone https://github.com/varun-ai69/Semantic-Image-Retrieval-and-Multi-temporal-Stallelite-Image-Analysis.git
+git clone https://github.com/rezabadi31/Semantic-Image-Retrieval-and-Multi-temporal-Stallelite-Image-Analysis.git
 cd Semantic-Image-Retrieval-and-Multi-temporal-Stallelite-Image-Analysis
 
-# Initialize environment variables
-cp .env.example .env
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-### 2. Launch Local Database & Vector Containers
+### 2. Run Phase 1 AOI-to-Tiles Pipeline
 ```bash
-docker compose -f infra/docker-compose.yml up -d
+python -m backend.ingestion.pipeline --geojson data/custom_aoi.geojson --region hyderabad_test
 ```
 
-### 3. Service Access Endpoints
-- **PostgreSQL / PostGIS**: `localhost:5434` (database: `eo_archive`, user: `eo_admin`, password: `eo_password`)
-- **Qdrant Vector DB REST API**: `http://localhost:6333`
-- **Qdrant Vector Dashboard**: `http://localhost:6333/dashboard`
-- **MinIO Object Storage S3 API**: `http://localhost:9000`
-- **MinIO Web Console**: `http://localhost:9001` (user: `eo_admin`, password: `eo_password`)
+### 3. Run Phase 2 Cloud & Shadow Masking Validation
+```bash
+python -m pytest tests/test_cloud_validation.py -v
+```
+
+### 4. Run Phase 5 Cloud Removal CLI
+```bash
+# Process cloudy Sentinel-2 scene
+python -m backend.cloud_removal.cli process --dataset-id cloud_masking_validation --scene-id S2A_43RGM_20230628_0_L2A
+
+# Inspect generated products
+python -m backend.cloud_removal.cli inspect --scene-id S2A_43RGM_20230628_0_L2A
+
+# Validate scientific preservation & tile dimensions
+python -m backend.cloud_removal.cli validate --scene-id S2A_43RGM_20230628_0_L2A
+
+# Print full validation report
+python -m backend.cloud_removal.cli report --dataset-id cloud_masking_validation --scene-id S2A_43RGM_20230628_0_L2A
+```
+
+### 5. Launch the Streamlit Defense Intelligence Mini UI/UX
+```bash
+streamlit run ui/geotiff_preview.py
+```
+*Access interactive inspection at `http://localhost:8501` featuring Section 1 (Timelines), Section 2 (Masks), Section 3 (512×512 Tiles), and Section 4 (Phase 5 De-Clouding).*
+
+### 6. Run Automated Test Suite
+```bash
+python -m pytest tests/test_cloud_removal.py tests/test_cloud_validation.py tests/test_dataset_registry.py tests/test_preview_service.py -v
+```
 
 ---
 
-## 🛡️ Offline & On-Premises Compliance
-
-This repository is built for **air-gapped deployment**:
-- Model weights and datasets are pre-staged in `models/` and `data/` using `infra/scripts/stage_offline_deps.sh`.
-- Code sets strict offline flags (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`).
-- All execution is validated via `infra/scripts/test_offline_mode.sh` with network interfaces physically disabled.
-
----
-
-## 📄 License & Provenance
-Logged in [`PROVENANCE.md`](PROVENANCE.md) per Ministry of Defence submission requirements.
+## 🔒 Data & Security Policy
+* **Git Exclusions**: All heavy satellite rasters (`*.tif`, `*.tiff`, `*.jp2`), full-size visual previews (`*.png`, `*.jpg`), and temporary caches are strictly excluded by `.gitignore`.
+* **Zero Secret Leakage**: No credentials, API tokens, or virtual environment binaries are committed.
+* **Audit Lineage**: Every processed product is accompanied by a standardized JSON manifest capturing provenance, sensor lineage, and quality metrics.

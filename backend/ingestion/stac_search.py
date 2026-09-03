@@ -19,12 +19,42 @@ DEFAULT_COLLECTION = "sentinel-2-l2a"
 
 @dataclass
 class STACBandAssets:
-    """Band URLs for visual and spectral analysis."""
+    """
+    Band asset URLs for visual and spectral analysis.
+    Supports all 10 Sentinel-2 bands required by s2cloudless plus green (B03) and SCL.
+    """
+    # Core RGB
     red: str       # Band 04 (665 nm)
     green: str     # Band 03 (560 nm)
     blue: str      # Band 02 (490 nm)
     nir: Optional[str] = None    # Band 08 (842 nm)
-    scl: Optional[str] = None    # Scene Classification Layer (if available)
+    
+    # Extended Sentinel-2 bands for s2cloudless
+    b01: Optional[str] = None    # Coastal aerosol (443 nm)
+    b05: Optional[str] = None    # Red Edge 1 (705 nm)
+    b8a: Optional[str] = None    # Narrow NIR (865 nm)
+    b09: Optional[str] = None    # Water vapour (945 nm)
+    b10: Optional[str] = None    # Cirrus (1375 nm)
+    b11: Optional[str] = None    # SWIR 1 (1610 nm)
+    b12: Optional[str] = None    # SWIR 2 (2190 nm)
+    scl: Optional[str] = None    # Scene Classification Layer
+
+    def to_band_dict(self) -> Dict[str, str]:
+        """Returns mapping of standard band names to asset URLs."""
+        mapping = {
+            "B01": self.b01 or "",
+            "B02": self.blue or "",
+            "B03": self.green or "",
+            "B04": self.red or "",
+            "B05": self.b05 or "",
+            "B08": self.nir or "",
+            "B8A": self.b8a or "",
+            "B09": self.b09 or "",
+            "B10": self.b10 or "",
+            "B11": self.b11 or "",
+            "B12": self.b12 or "",
+        }
+        return {k: v for k, v in mapping.items() if v}
 
 
 @dataclass
@@ -122,20 +152,37 @@ def search_stac_scene(
     raise RuntimeError(f"No satellite scene found for bbox {bbox} in date range {datetime_range}")
 
 
+def _get_asset_href(assets: Dict[str, Any], *keys: str) -> str:
+    """Helper to safely fetch asset URL matching any candidate key."""
+    for k in keys:
+        if k in assets:
+            asset = assets[k]
+            if isinstance(asset, dict):
+                return asset.get("href", "")
+            if hasattr(asset, "href"):
+                return asset.href
+    return ""
+
+
 def _parse_stac_item(item: Any, search_bbox: Tuple[float, float, float, float], source: str) -> STACSceneMetadata:
     """Extracts standardized metadata and band asset URLs from a PySTAC item."""
     item_dict = item.to_dict()
     props = item_dict.get("properties", {})
     assets_dict = item_dict.get("assets", {})
 
-    # Band mapping for Sentinel-2 AWS Earth Search
-    # AWS Earth Search typically keys assets as 'red', 'green', 'blue', 'nir', 'scl'
-    # or 'B04', 'B03', 'B02', 'B08'
-    red_url = (assets_dict.get("red") or assets_dict.get("B04") or assets_dict.get("visual", {})).get("href", "")
-    green_url = (assets_dict.get("green") or assets_dict.get("B03", {})).get("href", "")
-    blue_url = (assets_dict.get("blue") or assets_dict.get("B02", {})).get("href", "")
-    nir_url = (assets_dict.get("nir") or assets_dict.get("nir08") or assets_dict.get("B08", {})).get("href", None)
-    scl_url = (assets_dict.get("scl") or assets_dict.get("SCL", {})).get("href", None)
+    # Extract all 10 Sentinel-2 bands + B03 + SCL
+    b01_url = _get_asset_href(assets_dict, "B01", "b01", "coastal")
+    b02_url = _get_asset_href(assets_dict, "B02", "b02", "blue")
+    b03_url = _get_asset_href(assets_dict, "B03", "b03", "green")
+    b04_url = _get_asset_href(assets_dict, "B04", "b04", "red", "visual")
+    b05_url = _get_asset_href(assets_dict, "B05", "b05", "rededge1")
+    b08_url = _get_asset_href(assets_dict, "B08", "b08", "nir", "nir08")
+    b8a_url = _get_asset_href(assets_dict, "B8A", "b8a", "nir09", "rededge4")
+    b09_url = _get_asset_href(assets_dict, "B09", "b09", "wvp", "water_vapour")
+    b10_url = _get_asset_href(assets_dict, "B10", "b10", "cirrus")
+    b11_url = _get_asset_href(assets_dict, "B11", "b11", "swir16", "swir1")
+    b12_url = _get_asset_href(assets_dict, "B12", "b12", "swir22", "swir2")
+    scl_url = _get_asset_href(assets_dict, "scl", "SCL", "scl_20m")
 
     scene_id = item_dict.get("id", "S2_UNKNOWN_SCENE")
     acq_date = props.get("datetime") or props.get("acquisition_date") or datetime.utcnow().isoformat()
@@ -166,10 +213,17 @@ def _parse_stac_item(item: Any, search_bbox: Tuple[float, float, float, float], 
         source=source,
         bbox=item_bbox,
         assets=STACBandAssets(
-            red=red_url,
-            green=green_url,
-            blue=blue_url,
-            nir=nir_url,
+            red=b04_url,
+            green=b03_url,
+            blue=b02_url,
+            nir=b08_url,
+            b01=b01_url,
+            b05=b05_url,
+            b8a=b8a_url,
+            b09=b09_url,
+            b10=b10_url,
+            b11=b11_url,
+            b12=b12_url,
             scl=scl_url
         ),
         properties=props,
@@ -198,7 +252,14 @@ def _create_offline_mock_scene(
             green="mock://band_03_green.tif",
             blue="mock://band_02_blue.tif",
             nir="mock://band_08_nir.tif",
-            scl=None
+            b01="mock://band_01_coastal.tif",
+            b05="mock://band_05_rededge.tif",
+            b8a="mock://band_8a_narrownir.tif",
+            b09="mock://band_09_watervapour.tif",
+            b10="mock://band_10_cirrus.tif",
+            b11="mock://band_11_swir1.tif",
+            b12="mock://band_12_swir2.tif",
+            scl="mock://band_scl.tif"
         ),
         properties={
             "platform": "Sentinel-2A",
