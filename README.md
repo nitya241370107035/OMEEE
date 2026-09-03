@@ -1,9 +1,30 @@
-# Semantic Retrieval & Multi-Temporal Change Analysis of Satellite Imagery
+# 🛰️ AeroLens — Semantic Retrieval & Multi-Temporal Change Analysis of Satellite Imagery
+
+<div align="center">
+
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![Qdrant](https://img.shields.io/badge/Qdrant-Vector%20DB-DC2626?style=for-the-badge&logo=qdrant&logoColor=white)](https://qdrant.tech/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-316192?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![PostGIS](https://img.shields.io/badge/PostGIS-3.4-5B9BD5?style=for-the-badge&logo=postgis&logoColor=white)](https://postgis.net/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
+[![Leaflet](https://img.shields.io/badge/Leaflet-1.9.4-199900?style=for-the-badge&logo=leaflet&logoColor=white)](https://leafletjs.com/)
+[![GDAL](https://img.shields.io/badge/GDAL-Geospatial-489849?style=for-the-badge&logo=osgeo&logoColor=white)](https://gdal.org/)
+[![MinIO](https://img.shields.io/badge/MinIO-S3%20Storage-C72C48?style=for-the-badge&logo=minio&logoColor=white)](https://min.io/)
+[![RemoteCLIP](https://img.shields.io/badge/RemoteCLIP-ViT--B%2F32-8A2BE2?style=for-the-badge)](https://huggingface.co/chendelong/RemoteCLIP)
+[![Sentinel-2](https://img.shields.io/badge/Sentinel--2-10m%20Copernicus-003399?style=for-the-badge)](https://sentinel.esa.int/)
+
+**AI-Powered Geospatial Intelligence, Zero-Shot Semantic Earth Search & Multi-Temporal Change Detection Platform**
 
 > **Problem Statement Number:** SIH-26227  
 > **Organization:** Ministry of Defence (MoD) — Indian Army (DGIS)  
 > **Category:** Software | **Theme:** Space Technology  
 > **Repository:** [`varun-ai69/SIH-2026-PS26227-Semantic-Retrieval-and-Multi-Temporal-Analysis-`](https://github.com/varun-ai69/SIH-2026-PS26227-Semantic-Retrieval-and-Multi-Temporal-Analysis-)
+
+[Key Features](#-preprocessing--ingestion-phases-completed) • [System Architecture](#️-system-architecture--storage-strategy) • [Quickstart Guide](#-quickstart--execution-guide-docker-compose) • [Pipeline Flow](#-how-all-is-done-end-to-end-pipeline-execution-flow) • [API Specs](#-api-route-specification-apiv1)
+
+</div>
 
 ---
 
