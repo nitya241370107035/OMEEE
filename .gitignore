@@ -1,4 +1,8 @@
-# Satellite imagery, tiles, and thumbnails
+# ==========================================
+# AeroLens Git Ignore Rules
+# ==========================================
+
+# 1. Satellite Imagery, Rasters, Tiles & Previews
 *.tif
 *.tiff
 *.jpg
@@ -10,8 +14,16 @@
 *.npy
 *.npz
 data/tiles/
+data/uploads/
+data/processed_scenes/
+data/cache/
+!data/README.md
+!data/custom_aoi.geojson
 
-# Python cache & bytecode
+# 2. Reference & External Repositories
+SIH2026/
+
+# 3. Python Cache, Bytecode & Testing Artifacts
 __pycache__/
 *.py[cod]
 *$py.class
@@ -19,21 +31,31 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+.tox/
+.nox/
 
-# Environments & virtualenvs
+# 4. Virtual Environments
 .env
-.env.local
+.env.*
+!.env.example
 .venv/
 venv/
 ENV/
 env/
 
-# IDE & OS files
+# 5. IDE, OS & System Generated Logs
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 *.log
-
-# Temporary / scratch scripts
 scratch/
+.system_generated/
+
+# 6. Archives & Compressed Dumps
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z

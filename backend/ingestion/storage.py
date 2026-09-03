@@ -1,14 +1,15 @@
 """
-Phase 1.6: Tile Storage & Manifest Generation
+backend/ingestion/storage.py
+============================
+Phase 1.5: Disk Storage & Manifest Generation (Multi-Band GeoTIFFs + RGB Thumbnails)
+====================================================================================
+PS Sections: 2.2.3, 2.2.6 (Sovereign Storage Architecture)
 
 Saves tiles to the standardized directory layout:
   data/tiles/{region_id}/{date}/
-    ├── {tile_id}.tif          (GeoTIFF with EPSG:4326 metadata)
-    ├── {tile_id}_thumb.jpg    (Fast visual preview thumbnail)
-    └── manifest.json          (Full metadata & quality manifest)
-
-Computes honest quality_confidence scores based on real cloud/shadow percentages,
-while tagging registration_residual as an explicit placeholder for Phase 2 change pairing.
+    ├── {tile_id}.tif          (Full multi-band GeoTIFF with EPSG:4326 transform)
+    ├── {tile_id}_thumb.jpg    (8-bit RGB visual thumbnail for UI)
+    └── manifest.json          (Full metadata, quality signals, and spectral indices)
 """
 
 import json
@@ -16,7 +17,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 import numpy as np
 from PIL import Image
 import rasterio
@@ -32,14 +33,17 @@ logger = logging.getLogger(__name__)
 DEFAULT_DATA_DIR = Path("data")
 
 
-def format_date_dir(date_iso: str) -> str:
+def format_date_dir(date_iso: Optional[Union[str, datetime]]) -> str:
     """Formats an ISO-8601 date string to YYYY-MM-DD for folder naming."""
+    if not date_iso:
+        return datetime.utcnow().strftime("%Y-%m-%d")
+    if isinstance(date_iso, datetime):
+        return date_iso.strftime("%Y-%m-%d")
     try:
-        dt = datetime.fromisoformat(date_iso.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(str(date_iso).replace("Z", "+00:00"))
         return dt.strftime("%Y-%m-%d")
     except Exception:
-        # Fallback if already date or unusual format
-        return date_iso[:10].replace(":", "-")
+        return str(date_iso)[:10].replace(":", "-")
 
 
 def save_tile_geotiff(
@@ -48,23 +52,26 @@ def save_tile_geotiff(
     crs: str = "EPSG:4326"
 ) -> str:
     """
-    Saves RGB tile as a 3-band GeoTIFF with georeferencing metadata.
+    Saves multi-band tile as full-precision GeoTIFF with EPSG:4326 geotransform.
     """
-    num_bands, height, width = tile.rgb_data.shape
-    
+    num_bands, height, width = tile.multiband_data.shape
+    dtype = tile.multiband_data.dtype
+
     with rasterio.open(
-        output_path,
+        str(output_path),
         "w",
         driver="GTiff",
         height=height,
         width=width,
         count=num_bands,
-        dtype=tile.rgb_data.dtype,
+        dtype=dtype,
         crs=CRS.from_string(crs),
         transform=tile.transform,
         compress="lzw"
     ) as dst:
-        dst.write(tile.rgb_data)
+        dst.write(tile.multiband_data)
+        for idx, b_name in enumerate(tile.band_order, start=1):
+            dst.set_band_description(idx, b_name)
 
     return str(output_path.as_posix())
 
@@ -76,266 +83,124 @@ def save_tile_thumbnail(
     quality: int = 95
 ) -> str:
     """
-    Generates and saves a high-quality 512x512 JPEG thumbnail for map rendering & UI display.
+    Generates and saves a high-quality 512x512 JPEG thumbnail (RGB only) for UI rendering.
     """
-    # Transpose (3, H, W) to (H, W, 3)
     rgb_hwc = np.transpose(tile.rgb_data, (1, 2, 0))
     img = Image.fromarray(rgb_hwc, mode="RGB")
     
     if img.size != thumb_size:
-        img = img.resize(thumb_size, Image.Resampling.LANCZOS)
+        img = img.resize(thumb_size, Image.Resampling.BILINEAR)
     
-    img.save(output_path, format="JPEG", quality=quality, optimize=True)
+    img.save(str(output_path), format="JPEG", quality=quality, optimize=True)
     return str(output_path.as_posix())
 
 
 def save_tiles_and_manifest(
     tiles: List[TileCandidate],
-    aoi: ValidatedAOI,
-    scene_meta: STACSceneMetadata,
     region_id: str,
-    base_data_dir: Path = DEFAULT_DATA_DIR
+    scene_id: str,
+    acquisition_date: str,
+    aoi_geojson: Optional[Dict[str, Any]] = None,
+    base_data_dir: Path = DEFAULT_DATA_DIR,
+    source_type: str = "aoi_search",
+    extra_properties: Optional[Dict[str, Any]] = None
 ) -> Path:
     """
     Persists all tiles to disk in the structured archive hierarchy and writes manifest.json.
-
-    Args:
-        tiles: List of TileCandidate objects from Phase 1.5.
-        aoi: ValidatedAOI from Phase 1.0.
-        scene_meta: STACSceneMetadata from Phase 1.1.
-        region_id: Unique string identifier for the geographical region / project.
-        base_data_dir: Root storage path (default 'data/').
-
-    Returns:
-        Path: Absolute path to the generated manifest.json file.
     """
-    date_str = format_date_dir(scene_meta.acquisition_date)
+    date_str = format_date_dir(acquisition_date)
     out_dir = Path(base_data_dir) / "tiles" / region_id / date_str
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    tiles_records: List[Dict[str, Any]] = []
+    tile_records = []
 
     for tile in tiles:
         tif_filename = f"{tile.tile_id}.tif"
         jpg_filename = f"{tile.tile_id}_thumb.jpg"
-        
         tif_path = out_dir / tif_filename
         jpg_path = out_dir / jpg_filename
 
-        # Write GeoTIFF & Thumbnail
-        save_tile_geotiff(tile, tif_path, crs="EPSG:4326")
+        save_tile_geotiff(tile, tif_path)
         save_tile_thumbnail(tile, jpg_path)
-
-        # Honest quality confidence calculation based on real cloud percentage
-        # Gates downstream retrieval & change detection
-        quality_confidence = round(max(0.0, 1.0 - tile.cloud_pct), 4)
 
         tile_record = {
             "tile_id": tile.tile_id,
             "scene_id": tile.scene_id,
             "site_key": tile.site_key,
+            "source_type": tile.source_type or source_type,
+            "acquisition_date": acquisition_date,
+            "centroid": {
+                "latitude": tile.centroid_lat,
+                "longitude": tile.centroid_lon
+            },
+            "bounds_epsg4326": list(tile.bounds),
             "geometry": mapping(tile.footprint_geom),
-            "centroid_lat": tile.centroid_lat,
-            "centroid_lon": tile.centroid_lon,
-            "acquisition_date": scene_meta.acquisition_date,
-            "sensor": scene_meta.sensor,
-            "cloud_pct": tile.cloud_pct,
-            "registration_residual": 0.0,  # Explicit placeholder until 2-date pairing
-            "registration_residual_is_placeholder": True,
-            "quality_confidence": quality_confidence,
-            "quality_is_placeholder": False,  # Cloud & quality confidence are genuine
-            "ground_crop_size": tile.ground_crop_size,
-            "is_upsampled": tile.is_upsampled,
-            "file_path": str(tif_path.as_posix()),
-            "thumbnail_path": str(jpg_path.as_posix())
+            "quality": {
+                "cloud_pct": tile.cloud_pct,
+                "quality_confidence": tile.quality_confidence,
+                "passed_gate": bool(tile.quality_confidence >= 0.70)
+            },
+            "indices": {
+                "mean_ndvi": tile.mean_ndvi,
+                "mean_ndwi": tile.mean_ndwi,
+                "mean_ndbi": tile.mean_ndbi
+            },
+            "bands": {
+                "band_order": tile.band_order,
+                "band_stats": tile.band_stats
+            },
+            "storage": {
+                "geotiff_path": str(tif_path.resolve()),
+                "thumbnail_path": str(jpg_path.resolve())
+            }
         }
-        tiles_records.append(tile_record)
+        tile_records.append(tile_record)
 
-    # Manifest dictionary
-    manifest_data = {
-        "manifest_version": "1.0",
+    manifest_payload = {
+        "manifest_version": "2.0.0",
+        "generated_at": datetime.utcnow().isoformat() + "Z",
         "region_id": region_id,
-        "date": date_str,
-        "ingested_at": datetime.utcnow().isoformat() + "Z",
-        "total_tiles": len(tiles_records),
-        "ground_crop_size": tiles[0].ground_crop_size if tiles else 512,
-        "is_upsampled": tiles[0].is_upsampled if tiles else False,
-        "aoi": {
-            "bbox": aoi.bbox,
-            "area_km2": aoi.area_km2,
-            "geometry": mapping(aoi.polygon)
-        },
-        "scene": {
-            "scene_id": scene_meta.scene_id,
-            "acquisition_date": scene_meta.acquisition_date,
-            "sensor": scene_meta.sensor,
-            "crs": scene_meta.crs,
-            "cloud_cover": scene_meta.cloud_cover,
-            "source": scene_meta.source,
-            "is_mock": scene_meta.is_mock
-        },
-        "tiles": tiles_records
+        "scene_id": scene_id,
+        "acquisition_date": acquisition_date,
+        "source_type": source_type,
+        "total_tiles": len(tiles),
+        "aoi_geometry": aoi_geojson,
+        "metadata": extra_properties or {},
+        "tiles": tile_records
     }
 
     manifest_path = out_dir / "manifest.json"
     with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest_data, f, indent=2)
+        json.dump(manifest_payload, f, indent=2)
 
-    logger.info(
-        f"Archive saved: {len(tiles_records)} tiles written to {out_dir} "
-        f"(manifest: {manifest_path.name})"
-    )
-
+    logger.info(f"[Phase 1.5] Manifest and {len(tiles)} tiles saved successfully to: {manifest_path}")
     return manifest_path
 
 
 def save_intermediate_masks(
+    cleaned_canvas: Any,
+    region_id: str,
     scene_id: str,
-    cloud_prob: np.ndarray,
-    cloud_mask: np.ndarray,
-    transform: rasterio.Affine,
-    crs: str = "EPSG:4326",
-    shadow_mask: Optional[np.ndarray] = None,
-    bad_mask: Optional[np.ndarray] = None,
-    normalized_canvas: Optional[np.ndarray] = None,
-    raw_canvas: Optional[np.ndarray] = None,
-    base_data_dir: Path = DEFAULT_DATA_DIR,
-    output_subdir_name: Optional[str] = None
-) -> Dict[str, Path]:
-    """
-    Saves intermediate cloud detection and normalized outputs as georeferenced GeoTIFFs under
-    data/intermediate/{scene_id}/ (or custom subdir) for debugging, quality audit, and research reproducibility.
+    base_data_dir: Path = DEFAULT_DATA_DIR
+) -> Dict[str, str]:
+    """Saves full-canvas debug masks for quality audits."""
+    out_dir = Path(base_data_dir) / "masks" / region_id
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    Args:
-        scene_id: Satellite scene identifier.
-        cloud_prob: 2D float32 cloud probability map [0.0, 1.0].
-        cloud_mask: 2D boolean cloud mask.
-        transform: Affine geotransform.
-        crs: Coordinate reference system (default 'EPSG:4326').
-        shadow_mask: Optional 2D boolean shadow mask.
-        bad_mask: Optional 2D boolean combined mask.
-        normalized_canvas: Optional 3D (3, H, W) uint8 RGB normalized canvas.
-        raw_canvas: Optional 3D (Bands, H, W) float32/uint16 raw canvas.
-        base_data_dir: Root storage path.
-        output_subdir_name: Optional custom directory name (e.g. 'scene_2017', 'scene_2023').
+    cloud_path = out_dir / f"{scene_id}_cloud_mask.png"
+    shadow_path = out_dir / f"{scene_id}_shadow_mask.png"
+    bad_path = out_dir / f"{scene_id}_bad_mask.png"
 
-    Returns:
-        Dict[str, Path]: Mapping of output artifact names to their saved file paths.
-    """
-    folder_name = output_subdir_name if output_subdir_name else scene_id
-    inter_dir = Path(base_data_dir) / "intermediate" / folder_name
-    inter_dir.mkdir(parents=True, exist_ok=True)
+    if hasattr(cleaned_canvas, "cloud_mask"):
+        Image.fromarray((cleaned_canvas.cloud_mask * 255).astype(np.uint8)).save(cloud_path)
+    if hasattr(cleaned_canvas, "shadow_mask"):
+        Image.fromarray((cleaned_canvas.shadow_mask * 255).astype(np.uint8)).save(shadow_path)
+    if hasattr(cleaned_canvas, "bad_mask"):
+        Image.fromarray((cleaned_canvas.bad_mask * 255).astype(np.uint8)).save(bad_path)
 
-    height, width = cloud_mask.shape
-    saved_paths: Dict[str, Path] = {}
+    return {
+        "cloud_mask": str(cloud_path.as_posix()),
+        "shadow_mask": str(shadow_path.as_posix()),
+        "bad_mask": str(bad_path.as_posix())
+    }
 
-    # 1. Cloud Probability Map (float32 [0.0, 1.0])
-    prob_path = inter_dir / "cloud_probability.tif"
-    with rasterio.open(
-        prob_path,
-        "w",
-        driver="GTiff",
-        height=height,
-        width=width,
-        count=1,
-        dtype=np.float32,
-        crs=CRS.from_string(crs),
-        transform=transform,
-        compress="lzw"
-    ) as dst:
-        dst.write(cloud_prob.astype(np.float32), 1)
-    saved_paths["cloud_probability"] = prob_path
-
-    # 2. Binary Cloud Mask (uint8: 0 or 1)
-    mask_path = inter_dir / "cloud_mask.tif"
-    with rasterio.open(
-        mask_path,
-        "w",
-        driver="GTiff",
-        height=height,
-        width=width,
-        count=1,
-        dtype=np.uint8,
-        crs=CRS.from_string(crs),
-        transform=transform,
-        compress="lzw"
-    ) as dst:
-        dst.write(cloud_mask.astype(np.uint8), 1)
-    saved_paths["cloud_mask"] = mask_path
-
-    # 3. Shadow Mask (uint8: 0 or 1)
-    if shadow_mask is not None:
-        shadow_path = inter_dir / "shadow_mask.tif"
-        with rasterio.open(
-            shadow_path,
-            "w",
-            driver="GTiff",
-            height=height,
-            width=width,
-            count=1,
-            dtype=np.uint8,
-            crs=CRS.from_string(crs),
-            transform=transform,
-            compress="lzw"
-        ) as dst:
-            dst.write(shadow_mask.astype(np.uint8), 1)
-        saved_paths["shadow_mask"] = shadow_path
-
-    # 4. Optional Combined Bad Mask (uint8: 0 or 1)
-    if bad_mask is not None:
-        bad_path = inter_dir / "bad_mask.tif"
-        with rasterio.open(
-            bad_path,
-            "w",
-            driver="GTiff",
-            height=height,
-            width=width,
-            count=1,
-            dtype=np.uint8,
-            crs=CRS.from_string(crs),
-            transform=transform,
-            compress="lzw"
-        ) as dst:
-            dst.write(bad_mask.astype(np.uint8), 1)
-        saved_paths["bad_mask"] = bad_path
-
-    # 5. Normalized Canvas (3-band uint8 RGB [0, 255])
-    if normalized_canvas is not None:
-        norm_path = inter_dir / "normalized_canvas.tif"
-        n_bands = normalized_canvas.shape[0]
-        with rasterio.open(
-            norm_path,
-            "w",
-            driver="GTiff",
-            height=height,
-            width=width,
-            count=n_bands,
-            dtype=np.uint8,
-            crs=CRS.from_string(crs),
-            transform=transform,
-            compress="lzw"
-        ) as dst:
-            dst.write(normalized_canvas.astype(np.uint8))
-        saved_paths["normalized_canvas"] = norm_path
-
-    # 6. Raw Canvas (RGB or multiband)
-    if raw_canvas is not None:
-        raw_path = inter_dir / "raw_canvas.tif"
-        r_bands = min(3, raw_canvas.shape[0])
-        with rasterio.open(
-            raw_path,
-            "w",
-            driver="GTiff",
-            height=height,
-            width=width,
-            count=r_bands,
-            dtype=np.float32,
-            crs=CRS.from_string(crs),
-            transform=transform,
-            compress="lzw"
-        ) as dst:
-            dst.write(raw_canvas[:r_bands].astype(np.float32))
-        saved_paths["raw_canvas"] = raw_path
-
-    logger.info(f"Intermediate quality GeoTIFFs saved to: {inter_dir}")
-    return saved_paths

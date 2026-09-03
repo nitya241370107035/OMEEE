@@ -126,26 +126,35 @@ def clean_and_normalize_canvas(
     )
 
     # 4. Extract RGB bands for visual display and tile generation
-    band_map = {name: canvas_data.data[idx] for idx, name in enumerate(canvas_data.band_names)}
-    red = band_map.get("B04", band_map.get("red"))
-    green = band_map.get("B03", band_map.get("green"))
-    blue = band_map.get("B02", band_map.get("blue"))
-
-    if red is None or green is None or blue is None:
-        raise ValueError(
-            f"Canvas is missing RGB bands (B04, B03, B02). Available: {canvas_data.band_names}"
+    if hasattr(canvas_data, "visual_rgb") and canvas_data.visual_rgb is not None and canvas_data.visual_rgb.shape[0] >= 3:
+        # Use pristine 10m True Color Image with ESA Sen2Cor atmospheric balancing
+        rgb_stack = canvas_data.visual_rgb
+        rgb_normalized = normalize_rgb_percentile(
+            rgb_bands=rgb_stack,
+            bad_mask=quality.bad_mask,
+            p_low=0.5,
+            p_high=99.5,
+            gamma=1.0
         )
+    else:
+        band_map = {name.lower(): canvas_data.data[idx] for idx, name in enumerate(canvas_data.band_names)}
+        red = band_map.get("b04", band_map.get("red"))
+        green = band_map.get("b03", band_map.get("green"))
+        blue = band_map.get("b02", band_map.get("blue"))
 
-    rgb_stack = np.stack([red, green, blue], axis=0)
+        if red is None or green is None or blue is None:
+            raise ValueError(
+                f"Canvas is missing RGB bands (B04, B03, B02). Available: {canvas_data.band_names}"
+            )
 
-    # 5. Masked Radiometric Normalization (evaluated strictly on ~bad_mask pixels)
-    rgb_normalized = normalize_rgb_percentile(
-        rgb_bands=rgb_stack,
-        bad_mask=quality.bad_mask,
-        p_low=p_low,
-        p_high=p_high,
-        gamma=gamma
-    )
+        rgb_stack = np.stack([red, green, blue], axis=0)
+        rgb_normalized = normalize_rgb_percentile(
+            rgb_bands=rgb_stack,
+            bad_mask=quality.bad_mask,
+            p_low=p_low,
+            p_high=p_high,
+            gamma=gamma
+        )
 
     logger.info(
         f"Canvas cleaned & normalized: {canvas_data.width}x{canvas_data.height} px | "

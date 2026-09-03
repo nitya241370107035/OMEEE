@@ -42,13 +42,22 @@ CREATE TABLE IF NOT EXISTS tiles (
   quality_confidence          FLOAT,                    -- combined gate (cloud + registration + season)
   cluster_id                     TEXT,                   -- filled by the discovery/clustering job
   file_path                            TEXT,               -- main GeoTIFF (full bit depth/bands)
-  created_at                              TIMESTAMP DEFAULT now()
+  thumbnail_path                        TEXT,               -- 8-bit RGB preview JPG
+  band_order                              JSONB,              -- e.g. ["blue", "green", "red", "nir", "swir"]
+  band_stats                               JSONB,              -- per-band min, max, mean summary
+  mean_ndvi                                 FLOAT,              -- (NIR - Red) / (NIR + Red)
+  mean_ndwi                                  FLOAT,              -- (Green - NIR) / (Green + NIR)
+  mean_ndbi                                   FLOAT,              -- (SWIR - NIR) / (SWIR + NIR)
+  source_type                                  TEXT DEFAULT 'aoi_search', -- 'aoi_search' or 'organiser_provided'
+  created_at                                    TIMESTAMP DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS tiles_geom_idx ON tiles USING GIST (geometry);
 CREATE INDEX IF NOT EXISTS tiles_date_idx ON tiles (acquisition_date);
 CREATE INDEX IF NOT EXISTS tiles_site_idx ON tiles (site_key);
 CREATE INDEX IF NOT EXISTS tiles_cluster_idx ON tiles (cluster_id);
+CREATE INDEX IF NOT EXISTS tiles_ndvi_idx ON tiles (mean_ndvi);
+CREATE INDEX IF NOT EXISTS tiles_ndbi_idx ON tiles (mean_ndbi);
 
 -- ============================================================
 -- 3. CHANGE_EVENTS — output of comparing tile_before vs tile_after

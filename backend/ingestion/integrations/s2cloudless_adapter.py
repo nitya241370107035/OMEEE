@@ -142,24 +142,20 @@ def run_s2cloudless_detector(
     dilation_size: int = 2
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Executes the official s2cloudless S2PixelCloudDetector on the prepared 10-band canvas.
-
-    Args:
-        canvas_data: CanvasData object containing the 10 required Sentinel-2 bands.
-        threshold: Cloud probability cutoff threshold (0.0 to 1.0, default 0.40).
-        average_over: Spatial window averaging for cloud smoothing (default 4).
-        dilation_size: Morphological dilation radius for cloud buffer (default 2).
-
-    Returns:
-        Tuple of:
-          - cloud_probability: (Height, Width) float32 array in range [0.0, 1.0]
-          - cloud_mask: (Height, Width) boolean array (True = cloud)
+    Executes s2cloudless S2PixelCloudDetector if all 10 bands are present,
+    or falls back to spectral cloud detection for 5-band/4-band/3-band canvases.
     """
-    # 1. Prepare 4D tensor (1, H, W, 10) in reflectance scale [0, 1]
-    tensor_4d = prepare_s2cloudless_tensor(canvas_data)
+    available_set = set(canvas_data.band_names)
+    has_all_10_bands = all(b in available_set for b in S2CLOUDLESS_BANDS)
+
+    if not has_all_10_bands:
+        logger.info("[Phase 1.3] 5-band/4-band canvas detected; utilizing multi-spectral cloud & whiteness detector.")
+        return _spectral_fallback_detector(canvas_data, threshold=threshold)
 
     try:
         from s2cloudless import S2PixelCloudDetector
+
+        tensor_4d = prepare_s2cloudless_tensor(canvas_data)
 
         logger.info(
             f"Invoking s2cloudless S2PixelCloudDetector "
@@ -181,17 +177,12 @@ def run_s2cloudless_detector(
         mask_stack = detector.get_cloud_masks(tensor_4d)
         cloud_mask = mask_stack[0].astype(bool)
 
-        logger.info(
-            f"s2cloudless detector execution successful: "
-            f"Cloud Pixels: {int(np.count_nonzero(cloud_mask))} / {cloud_mask.size} "
-            f"({(np.count_nonzero(cloud_mask) / cloud_mask.size) * 100:.2f}%)"
-        )
-
         return cloud_prob, cloud_mask
 
     except ImportError as imp_err:
-        logger.warning(f"s2cloudless package not imported ({imp_err}). Using fallback detector.")
+        logger.warning(f"s2cloudless package not imported ({imp_err}). Using spectral detector.")
         return _spectral_fallback_detector(canvas_data, threshold=threshold)
     except Exception as exc:
         logger.warning(f"s2cloudless execution encountered error ({exc}). Falling back to spectral detector.")
         return _spectral_fallback_detector(canvas_data, threshold=threshold)
+

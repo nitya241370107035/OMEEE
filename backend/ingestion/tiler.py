@@ -1,24 +1,24 @@
 """
-Phase 1.4 & Phase 1.5: Sliding Window Tiling, Ground-Crop Zooming, & Polygon Filtering
+backend/ingestion/tiler.py
+==========================
+Phase 1.4: Multi-Band Sliding Window Tiling & Index Computation (NDVI, NDWI, NDBI)
+==================================================================================
+PS Sections: 2.2.1, 2.2.3 (Quality Filtering), 2.2.6 (Tiling Foundation)
 
-Slices the cleaned and normalized canvas into 512x512 tiles, computes exact geographic
-transforms, calculates per-tile real cloud percentage from the bad pixel mask,
-and strictly filters candidate tiles against the validated AOI polygon footprint.
+Slices the working canvas into 512x512 multi-band tiles, computes exact geographic
+transforms, calculates real per-tile cloud percentage from the bad pixel mask,
+computes mean spectral indices (NDVI, NDWI, NDBI), and performs spatial filtering.
 
-========================================================================================
-RESOLUTION & GROUND CROP SIZE CONFIGURATION:
-- GROUND_CROP_SIZE = 512: True 5.12km x 5.12km tile at native Sentinel-2 10m/px resolution.
-  No upsampling or interpolation. Recommended for ML embedding & change detection accuracy.
-- GROUND_CROP_SIZE = 25 (approx 250m x 250m): Zoomed ground patch upsampled to 512x512
-  via Lanczos resampling for close visual inspection. Note: upsampled tiles are interpolated
-  and do not contain genuine high-resolution sensor detail beyond native 10m pixels.
-========================================================================================
+Derived Indices:
+  - NDVI = (NIR - Red) / (NIR + Red)           [Vegetation Health & Crops]
+  - NDWI = (Green - NIR) / (Green + NIR)       [Water Bodies & Inundation]
+  - NDBI = (SWIR - NIR) / (SWIR + NIR)         [Built-Up, Concrete & Structures]
 """
 
 import hashlib
 import logging
 from dataclasses import dataclass
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Any, Optional, Union
 import numpy as np
 from PIL import Image
 import rasterio
@@ -30,162 +30,215 @@ from backend.ingestion.masking import CleanedCanvas
 
 logger = logging.getLogger(__name__)
 
-# Default ground crop size (pixels on the 10m canvas before resizing to 512x512)
-# Set to 512 for native resolution, or 25-100 for zoomed view.
 DEFAULT_GROUND_CROP_SIZE = 512
-TARGET_TILE_SIZE = 512  # Final output dimension (512x512)
+TARGET_TILE_SIZE = 512
 
 
 @dataclass
 class TileCandidate:
-    """Represents a generated 512x512 tile ready for indexing/storage."""
+    """Represents a generated 512x512 tile with full multi-band data, RGB, and spectral indices."""
     tile_id: str
     scene_id: str
     site_key: str
-    rgb_data: np.ndarray             # Shape: (3, 512, 512), uint8
+    multiband_data: np.ndarray       # Shape: (Bands, 512, 512), float32 (Raw bit depth)
+    rgb_data: np.ndarray             # Shape: (3, 512, 512), uint8 (Normalized RGB)
+    band_order: List[str]            # e.g. ['blue', 'green', 'red', 'nir', 'swir']
+    band_stats: Dict[str, Dict[str, float]]  # per-band min, max, mean
     transform: Affine                # Affine geotransform in EPSG:4326
     bounds: Tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat)
     centroid_lat: float
     centroid_lon: float
     cloud_pct: float                 # Real fraction of bad/cloud pixels (0.0 to 1.0)
-    footprint_geom: Polygon          # Shapely geometry for spatial intersection
-    ground_crop_size: int
-    is_upsampled: bool
+    quality_confidence: float        # Quality gate (1.0 - cloud_pct)
+    mean_ndvi: Optional[float]       # (NIR - Red) / (NIR + Red)
+    mean_ndwi: Optional[float]       # (Green - NIR) / (Green + NIR)
+    mean_ndbi: Optional[float]       # (SWIR - NIR) / (SWIR + NIR)
+    footprint_geom: Polygon          # Shapely polygon footprint in EPSG:4326
+    source_type: str = "aoi_search"
 
 
 def generate_site_key(lat: float, lon: float, precision: int = 4) -> str:
     """
     Generates a stable, deterministic spatial key for a physical ground location.
-    Allows multi-temporal tiles of the same spot across different dates to be paired.
+    Shared across multi-temporal tiles covering the same spot on Earth.
     """
     lat_r = round(lat, precision)
     lon_r = round(lon, precision)
     coord_str = f"{lat_r:.4f}_{lon_r:.4f}"
-    h = hashlib.sha256(coord_str.encode("utf-8")).hexdigest()[:10]
+    h = hashlib.sha256(coord_str.encode("utf-8")).hexdigest()[:8]
     return f"site_{lat_r:.4f}_{lon_r:.4f}_{h}"
+
+
+def compute_spectral_indices(
+    tile_multiband: np.ndarray,
+    band_order: List[str],
+    bad_mask: np.ndarray
+) -> Tuple[Optional[float], Optional[float], Optional[float], Dict[str, Dict[str, float]]]:
+    """
+    Computes scalar mean NDVI, NDWI, NDBI and per-band statistics for a tile.
+    Excludes bad/cloud pixels when computing means to avoid skewing indices.
+    """
+    band_map = {name.lower(): tile_multiband[i].astype(np.float32) for i, name in enumerate(band_order)}
+    valid_mask = ~bad_mask
+    if not np.any(valid_mask):
+        valid_mask = np.ones_like(bad_mask, dtype=bool)
+
+    red = band_map.get("red")
+    green = band_map.get("green")
+    nir = band_map.get("nir")
+    swir = band_map.get("swir")
+
+    mean_ndvi: Optional[float] = None
+    mean_ndwi: Optional[float] = None
+    mean_ndbi: Optional[float] = None
+
+    # NDVI = (NIR - Red) / (NIR + Red)
+    if nir is not None and red is not None:
+        denom = nir + red
+        denom[denom == 0] = 1e-6
+        ndvi_arr = (nir - red) / denom
+        mean_ndvi = float(np.clip(np.mean(ndvi_arr[valid_mask]), -1.0, 1.0))
+
+    # NDWI = (Green - NIR) / (Green + NIR)
+    if green is not None and nir is not None:
+        denom = green + nir
+        denom[denom == 0] = 1e-6
+        ndwi_arr = (green - nir) / denom
+        mean_ndwi = float(np.clip(np.mean(ndwi_arr[valid_mask]), -1.0, 1.0))
+
+    # NDBI = (SWIR - NIR) / (SWIR + NIR)
+    if swir is not None and nir is not None:
+        denom = swir + nir
+        denom[denom == 0] = 1e-6
+        ndbi_arr = (swir - nir) / denom
+        mean_ndbi = float(np.clip(np.mean(ndbi_arr[valid_mask]), -1.0, 1.0))
+
+    # Per-band summary statistics
+    band_stats = {}
+    for name, arr in band_map.items():
+        v_pixels = arr[valid_mask]
+        band_stats[name] = {
+            "min": round(float(np.min(v_pixels)), 2),
+            "max": round(float(np.max(v_pixels)), 2),
+            "mean": round(float(np.mean(v_pixels)), 2)
+        }
+
+    return mean_ndvi, mean_ndwi, mean_ndbi, band_stats
 
 
 def slice_and_filter_tiles(
     canvas_data: CanvasData,
     cleaned_canvas: CleanedCanvas,
-    aoi_polygon: Polygon,
     scene_id: str,
+    aoi_polygon: Optional[Union[Polygon, MultiPolygon]] = None,
     ground_crop_size: int = DEFAULT_GROUND_CROP_SIZE,
     overlap_pct: float = 0.10,
-    target_size: int = TARGET_TILE_SIZE
+    target_size: int = TARGET_TILE_SIZE,
+    source_type: str = "aoi_search"
 ) -> List[TileCandidate]:
     """
-    Generates 512x512 tiles across the working canvas and filters against the AOI polygon.
-
-    Args:
-        canvas_data: Working canvas with geotransform and dimensions.
-        cleaned_canvas: Cleaned RGB array and bad pixel mask from Phase 1.3.
-        aoi_polygon: Validated AOI Shapely polygon from Phase 1.0.
-        scene_id: Satellite scene identifier.
-        ground_crop_size: Window size in canvas pixels (e.g. 512 for native, 25 for zoomed).
-        overlap_pct: Overlap fraction between adjacent windows (default 10%).
-        target_size: Target tile size in pixels (default 512).
-
-    Returns:
-        List[TileCandidate]: Kept tiles intersecting the AOI polygon with real cloud_pct.
+    Slices the multi-band working canvas into 512x512 tiles, computes indices,
+    and filters against the AOI polygon (if provided).
     """
     c_height, c_width = canvas_data.height, canvas_data.width
     c_transform = canvas_data.transform
+    raw_multiband = canvas_data.data
+    band_order = canvas_data.band_names
     rgb = cleaned_canvas.rgb_normalized
     bad_mask = cleaned_canvas.bad_mask
 
-    # Step size between sliding windows
     stride = max(1, int(round(ground_crop_size * (1.0 - overlap_pct))))
-    is_upsampled = (ground_crop_size != target_size)
+    tiles: List[TileCandidate] = []
+    tile_index = 1
 
-    y_starts = list(range(0, c_height - ground_crop_size + 1, stride))
-    if not y_starts or y_starts[-1] + ground_crop_size < c_height:
-        y_starts.append(max(0, c_height - ground_crop_size))
-    y_starts = sorted(list(set(y_starts)))
+    for y in range(0, c_height - ground_crop_size + 1, stride):
+        for x in range(0, c_width - ground_crop_size + 1, stride):
+            # Compute tile bounds in EPSG:4326
+            min_lon, max_lat = c_transform * (x, y)
+            max_lon, min_lat = c_transform * (x + ground_crop_size, y + ground_crop_size)
+            tile_bounds = (min_lon, min_lat, max_lon, max_lat)
+            tile_poly = box(min_lon, min_lat, max_lon, max_lat)
 
-    x_starts = list(range(0, c_width - ground_crop_size + 1, stride))
-    if not x_starts or x_starts[-1] + ground_crop_size < c_width:
-        x_starts.append(max(0, c_width - ground_crop_size))
-    x_starts = sorted(list(set(x_starts)))
-
-    candidates: List[TileCandidate] = []
-    total_windows = 0
-    kept_windows = 0
-
-    for r in y_starts:
-        for c in x_starts:
-            total_windows += 1
-            r_end = min(c_height, r + ground_crop_size)
-            c_end = min(c_width, c + ground_crop_size)
-
-            # 1. Geographic Bounds calculation from canvas transform
-            # Upper-left coordinate of window
-            lon_ul = c_transform.c + c_transform.a * c + c_transform.b * r
-            lat_ul = c_transform.f + c_transform.d * c + c_transform.e * r
-            # Lower-right coordinate of window
-            lon_lr = c_transform.c + c_transform.a * c_end + c_transform.b * r_end
-            lat_lr = c_transform.f + c_transform.d * c_end + c_transform.e * r_end
-
-            min_lon = min(lon_ul, lon_lr)
-            max_lon = max(lon_ul, lon_lr)
-            min_lat = min(lat_ul, lat_lr)
-            max_lat = max(lat_ul, lat_lr)
-
-            tile_box = box(min_lon, min_lat, max_lon, max_lat)
-
-            # 2. Phase 1.5: Filter against exact AOI polygon
-            if not tile_box.intersects(aoi_polygon):
-                # Discard tile if outside drawn AOI polygon
+            # Spatial filtering against AOI polygon (Entry Point A only)
+            if aoi_polygon is not None and not tile_poly.intersects(aoi_polygon):
                 continue
 
-            kept_windows += 1
-
-            # 3. Real Per-Tile Cloud & Shadow Percentage from Phase 1.3 mask
-            mask_slice = bad_mask[r:r_end, c:c_end]
-            if mask_slice.size > 0:
-                tile_cloud_pct = round(float(np.count_nonzero(mask_slice) / mask_slice.size), 4)
-            else:
-                tile_cloud_pct = 0.0
-
-            # 4. Crop RGB data and resize to target_size (512x512)
-            rgb_crop = rgb[:, r:r_end, c:c_end]  # Shape: (3, H_crop, W_crop)
-
-            if rgb_crop.shape[1] != target_size or rgb_crop.shape[2] != target_size:
-                # Transpose to (H, W, 3) for PIL image resizing
-                img_pil = Image.fromarray(np.transpose(rgb_crop, (1, 2, 0)))
-                resample_method = Image.Resampling.LANCZOS if (rgb_crop.shape[1] < target_size or rgb_crop.shape[2] < target_size) else Image.Resampling.BICUBIC
-                img_resized = img_pil.resize((target_size, target_size), resample=resample_method)
-                rgb_final = np.transpose(np.array(img_resized), (2, 0, 1))
-            else:
-                rgb_final = rgb_crop
-
-            # Compute tile transform for target 512x512 dimensions
-            tile_transform = from_bounds(min_lon, min_lat, max_lon, max_lat, target_size, target_size)
-            centroid_lat = round((min_lat + max_lat) / 2.0, 6)
-            centroid_lon = round((min_lon + max_lon) / 2.0, 6)
-
+            centroid_lon = (min_lon + max_lon) / 2.0
+            centroid_lat = (min_lat + max_lat) / 2.0
             site_key = generate_site_key(centroid_lat, centroid_lon)
-            tile_id = f"{scene_id}_{site_key}"
 
-            candidate = TileCandidate(
-                tile_id=tile_id,
-                scene_id=scene_id,
-                site_key=site_key,
-                rgb_data=rgb_final,
-                transform=tile_transform,
-                bounds=(min_lon, min_lat, max_lon, max_lat),
-                centroid_lat=centroid_lat,
-                centroid_lon=centroid_lon,
-                cloud_pct=tile_cloud_pct,
-                footprint_geom=tile_box,
-                ground_crop_size=ground_crop_size,
-                is_upsampled=is_upsampled
+            # Extract window arrays
+            tile_bad_mask = bad_mask[y:y + ground_crop_size, x:x + ground_crop_size]
+            tile_cloud_pct = float(np.count_nonzero(tile_bad_mask)) / float(tile_bad_mask.size)
+            quality_conf = max(0.0, min(1.0, 1.0 - tile_cloud_pct))
+
+            tile_multiband = raw_multiband[:, y:y + ground_crop_size, x:x + ground_crop_size]
+            tile_rgb = rgb[:, y:y + ground_crop_size, x:x + ground_crop_size]
+
+            # Discard completely empty / nodata tiles located outside the satellite swath
+            if np.all(tile_multiband == 0) or float(np.mean(tile_multiband)) < 1e-3:
+                continue
+
+            # Resize to target 512x512 if ground crop size differs
+            if ground_crop_size != target_size:
+                # Resize RGB
+                pil_rgb = Image.fromarray(np.transpose(tile_rgb, (1, 2, 0)))
+                pil_rgb_resized = pil_rgb.resize((target_size, target_size), Image.Resampling.BILINEAR)
+                final_rgb = np.transpose(np.array(pil_rgb_resized), (2, 0, 1))
+
+                # Resize multiband
+                resized_bands = []
+                for b_idx in range(tile_multiband.shape[0]):
+                    pil_b = Image.fromarray(tile_multiband[b_idx])
+                    pil_b_resized = pil_b.resize((target_size, target_size), Image.Resampling.BILINEAR)
+                    resized_bands.append(np.array(pil_b_resized, dtype=np.float32))
+                final_multiband = np.stack(resized_bands, axis=0)
+
+                # Resize mask
+                pil_m = Image.fromarray(tile_bad_mask.astype(np.uint8))
+                pil_m_resized = pil_m.resize((target_size, target_size), Image.Resampling.NEAREST)
+                final_bad_mask = np.array(pil_m_resized, dtype=bool)
+            else:
+                final_rgb = tile_rgb
+                final_multiband = tile_multiband
+                final_bad_mask = tile_bad_mask
+
+            tile_transform = from_bounds(min_lon, min_lat, max_lon, max_lat, target_size, target_size)
+
+            # Compute spectral indices
+            mean_ndvi, mean_ndwi, mean_ndbi, band_stats = compute_spectral_indices(
+                final_multiband, band_order, final_bad_mask
             )
-            candidates.append(candidate)
+
+            clean_scene_id = scene_id.replace(":", "_").replace("/", "_")
+            tile_id = f"{clean_scene_id}_tile_{tile_index:05d}"
+            tile_index += 1
+
+            tiles.append(
+                TileCandidate(
+                    tile_id=tile_id,
+                    scene_id=scene_id,
+                    site_key=site_key,
+                    multiband_data=final_multiband,
+                    rgb_data=final_rgb,
+                    band_order=band_order,
+                    band_stats=band_stats,
+                    transform=tile_transform,
+                    bounds=tile_bounds,
+                    centroid_lat=round(centroid_lat, 6),
+                    centroid_lon=round(centroid_lon, 6),
+                    cloud_pct=round(tile_cloud_pct, 4),
+                    quality_confidence=round(quality_conf, 4),
+                    mean_ndvi=mean_ndvi,
+                    mean_ndwi=mean_ndwi,
+                    mean_ndbi=mean_ndbi,
+                    footprint_geom=tile_poly,
+                    source_type=source_type
+                )
+            )
 
     logger.info(
-        f"Tiling complete: generated {total_windows} windows, "
-        f"kept {len(candidates)} tiles intersecting the AOI polygon."
+        f"[Phase 1.4] Tiling completed for scene '{scene_id}': "
+        f"Generated {len(tiles)} tiles (Crop={ground_crop_size}px, Overlap={overlap_pct*100:.0f}%)"
     )
-
-    return candidates
+    return tiles
