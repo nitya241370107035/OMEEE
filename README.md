@@ -7,7 +7,7 @@
 
 ---
 
-## 🛰️ Executive Summary
+## Executive Summary
 
 Modern defense intelligence analysts require the capability to query multi-temporal satellite imagery archives **by semantic meaning** (e.g. *"find airstrips with visible hangars near river bends"* or *"detect newly cleared land or road construction"*) rather than relying strictly on geographic coordinates or metadata dates. Additionally, the system must automatically flag **true multi-temporal change events** while suppressing false alarms caused by cloud coverage, seasonal variations, sun angles, or spatial misalignment.
 
@@ -15,7 +15,7 @@ This platform provides an end-to-end, **100% on-premises, network-isolated solut
 
 ---
 
-## 🏗️ System Architecture & Storage Strategy
+## System Architecture & Storage Strategy
 
 The system enforces a strict separation between ingestion-time heavy precomputation and query-time rapid resolution:
 
@@ -46,33 +46,33 @@ The system enforces a strict separation between ingestion-time heavy precomputat
 
 ---
 
-## 📋 Preprocessing & Ingestion Phases (COMPLETED)
+## Preprocessing & Ingestion Phases (COMPLETED)
 
-### ✅ Phase 1.0 — Arbitrary Input Validation & Bounding Box Extraction
+### Phase 1.0 — Arbitrary Input Validation & Bounding Box Extraction
 * **Dual Ingestion Entry Points**:
   - **Entry Point A (AOI Draw / GeoJSON + Timeline)**: Validates arbitrary polygons, auto-closes open rings, computes geographic bounding box, and calculates safety buffer margins.
   - **Entry Point B (Offline Evaluation GeoTIFF)**: Reads local rasters, extracts coordinate reference systems (CRS), bounding box in WGS84, dimensions, and band configurations with zero external network access.
 
-### ✅ Phase 1.1 — Multi-Temporal Scene Search against STAC Catalog
+### Phase 1.1 — Multi-Temporal Scene Search against STAC Catalog
 * **Time-Window Bucketing**: Splits user-requested date ranges (e.g. 1 to 10 years) into discrete temporal buckets (T1 Historical vs T2 Recent).
 * **Automated STAC Queries**: Queries AWS Earth Search Sentinel-2 L2A catalog for clear-sky imagery (`cloud_cover < 20%`), selecting optimal scenes per bucket.
 * **Deterministic Offline Fallback**: Generates realistic synthetic 5-band fallback scenes when operating in air-gapped environments.
 
-### ✅ Phase 1.2 — 5-Band Canvas Reprojection & High-Fidelity TCI Streaming
+### Phase 1.2 — 5-Band Canvas Reprojection & High-Fidelity TCI Streaming
 * **Standardized 10m Coordinate Space**: Warps scenes to EPSG:4326 using single-stage GDAL WarpedVRT bilinear reprojection.
 * **Pristine True Color Image (TCI)**: Streams 10m ESA-calibrated True Color Image (`TCI.tif`) with Sen2Cor atmospheric balancing for ultra-crisp visual display and embedding extraction.
 * **5 Core Scientific Bands**: Simultaneously streams Blue (`B02`), Green (`B03`), Red (`B04`), NIR (`B08`), and SWIR (`B11`) for multi-spectral analysis.
 
-### ✅ Phase 1.3 — Cloud Masking, Directional Shadow Masking & Quality Gating
+### Phase 1.3 — Cloud Masking, Directional Shadow Masking & Quality Gating
 * **Machine Learning Cloud Detection**: Integrates `s2cloudless` gradient-boosted trees over Sentinel-2 bands to compute pixel-level cloud probabilities ($0.0$ to $1.0$).
 * **Directional Shadow Detection**: Casts cloud neighborhood shadow projection rays and evaluates NIR dips.
 * **Quality Mask Merging**: Combines clouds and shadows into a single binary bad-pixel mask (`bad_mask`).
 
-### ✅ Phase 1.4 — Mask-Aware Radiometric Percentile Normalization
+### Phase 1.4 — Mask-Aware Radiometric Percentile Normalization
 * **Sub-Percentile Contrast Stretch**: Applies 0.5%–99.5% dynamic range percentile stretching strictly over clean ground pixels (`~bad_mask`).
 * **Radiometric Integrity**: Prevents cloud brightness or shadow darkness from skewing ground contrast, preserving natural color balance.
 
-### ✅ Phase 1.5 — Strict 512×512 Tiling & Multi-Spectral Indices
+### Phase 1.5 — Strict 512×512 Tiling & Multi-Spectral Indices
 * **Spatial Tiling**: Slices working canvas into 512×512 patches with configurable stride/overlap (default 10%).
 * **Exact Polygon Intersection**: Filters out tiles falling outside the user's drawn AOI polygon.
 * **Spectral Indices Computation**:
@@ -81,15 +81,15 @@ The system enforces a strict separation between ingestion-time heavy precomputat
   - **NDBI** (Built-Up / Urban): $(\text{SWIR} - \text{NIR}) / (\text{SWIR} + \text{NIR})$
 * **Deterministic Site Keys**: Generates stable spatial hashes for tracking physical ground locations across multi-temporal epochs.
 
-### ✅ Phase 1.6 — PostGIS Database Storage & Ingestion Coverage
+### Phase 1.6 — PostGIS Database Storage & Ingestion Coverage
 * **Schema Upsert**: Atomically records scenes in `scenes`, tiles in `tiles`, and updates `ingestion_coverage` with sector polygon geometries.
 * **Coverage Visualizer**: Exposes `GET /api/v1/coverage` returning GeoJSON FeatureCollections for map rendering.
 
-### ✅ Phase 1.8 — RemoteCLIP ViT-B-32 Vector Embeddings & Qdrant Upsert
+### Phase 1.8 — RemoteCLIP ViT-B-32 Vector Embeddings & Qdrant Upsert
 * **Vision-Language Encoder**: Passes preprocessed 512x512 tile visual arrays through fine-tuned RemoteCLIP ViT-B-32, generating L2-normalized 512-dimensional feature embeddings.
 * **Vector Store Indexing**: Performs batch upserts into Qdrant `tile_embeddings` collection with payload metadata (`tile_id`, `scene_id`, `site_key`, `acquisition_date`, `cloud_pct`, `ndvi`, `ndwi`, `ndbi`).
 
-### ✅ Frontend — Interactive Leaflet Map & Ingestion UI
+### Frontend — Interactive Leaflet Map & Ingestion UI
 * **Global Satellite Map**: Deep zoom capability (up to level 20) with 4-layer basemap switcher (Esri World Imagery, Google Satellite Hybrid, CartoDB Dark Matter, OSM).
 * **Interactive AOI Draw Tool**: Draw polygons on map with auto-closure snapping.
 * **Multi-Year Timeline Selector**: 1 Year, 2 Years (T1 vs T2), 3 Years, 5 Years, 10 Years, or Custom Date Ranges.
@@ -98,7 +98,7 @@ The system enforces a strict separation between ingestion-time heavy precomputat
 
 ---
 
-## 🚀 Quickstart & Execution Guide (Docker Compose)
+## Quickstart & Execution Guide (Docker Compose)
 
 The entire application stack (FastAPI Backend, Leaflet Web UI, PostgreSQL/PostGIS, Qdrant Vector DB, and MinIO S3) is fully containerized and runs with a single command.
 
@@ -139,7 +139,7 @@ pytest tests/ -v
 
 ---
 
-## 🔄 How All Is Done (End-to-End Pipeline Execution Flow)
+## How All Is Done (End-to-End Pipeline Execution Flow)
 
 ```text
 1. User draws AOI polygon on Leaflet Map & selects timeline (e.g., 2024, 2 buckets)
@@ -180,7 +180,7 @@ pytest tests/ -v
 
 ---
 
-## 📁 Repository Directory Structure
+## Repository Directory Structure
 
 ```
 .
@@ -233,7 +233,7 @@ pytest tests/ -v
 
 ---
 
-## 🔌 API Route Specification (`/api/v1`)
+## API Route Specification (`/api/v1`)
 
 | Endpoint | Method | Input | Description |
 |---|---|---|---|
