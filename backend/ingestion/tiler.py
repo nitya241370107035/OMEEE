@@ -83,10 +83,11 @@ def compute_spectral_indices(
     if not np.any(valid_mask):
         valid_mask = np.ones_like(bad_mask, dtype=bool)
 
-    red = band_map.get("red")
-    green = band_map.get("green")
-    nir = band_map.get("nir")
-    swir = band_map.get("swir")
+    red = band_map.get("b04", band_map.get("red", band_map.get("band_1", tile_multiband[0].astype(np.float32) if tile_multiband.shape[0] >= 3 else None)))
+    green = band_map.get("b03", band_map.get("green", band_map.get("band_2", tile_multiband[1].astype(np.float32) if tile_multiband.shape[0] >= 3 else None)))
+    blue = band_map.get("b02", band_map.get("blue", band_map.get("band_3", tile_multiband[2].astype(np.float32) if tile_multiband.shape[0] >= 3 else None)))
+    nir = band_map.get("b08", band_map.get("nir", band_map.get("band_4", tile_multiband[3].astype(np.float32) if tile_multiband.shape[0] >= 4 else None)))
+    swir = band_map.get("b11", band_map.get("swir", band_map.get("b12", band_map.get("band_5", tile_multiband[4].astype(np.float32) if tile_multiband.shape[0] >= 5 else None))))
 
     mean_ndvi: Optional[float] = None
     mean_ndwi: Optional[float] = None
@@ -128,15 +129,17 @@ def compute_spectral_indices(
 
 def _get_grid_steps(total_dim: int, window_size: int, stride: int) -> List[int]:
     """
-    Computes equidistant sliding window start offsets ensuring full 100% boundary coverage
-    with uniform spacing and ZERO identical/duplicate tile slices.
+    Computes sliding window start offsets using a literal fixed-stride step generator,
+    ensuring a deterministic, uniform grid and full boundary coverage.
     """
     if total_dim <= window_size:
         return [0]
     
-    num_steps = max(2, int(np.ceil((total_dim - window_size) / float(stride))) + 1)
-    offsets = np.linspace(0, total_dim - window_size, num_steps, dtype=int)
-    return sorted(list(set(offsets.tolist())))
+    stride = max(1, int(stride))
+    offsets = list(range(0, total_dim - window_size + 1, stride))
+    if offsets[-1] != total_dim - window_size:
+        offsets.append(total_dim - window_size)
+    return offsets
 
 
 def slice_and_filter_tiles(
@@ -164,8 +167,8 @@ def slice_and_filter_tiles(
     eff_crop_size = min(ground_crop_size, min(c_height, c_width))
     stride = max(1, int(round(eff_crop_size * (1.0 - overlap_pct))))
 
-    y_steps = _get_grid_steps(c_height, eff_crop_size, stride)
     x_steps = _get_grid_steps(c_width, eff_crop_size, stride)
+    y_steps = _get_grid_steps(c_height, eff_crop_size, stride)
 
     tiles: List[TileCandidate] = []
     tile_index = 1
@@ -180,6 +183,7 @@ def slice_and_filter_tiles(
 
             # Spatial filtering against AOI polygon (Entry Point A only)
             if aoi_polygon is not None and not tile_poly.intersects(aoi_polygon):
+                logger.debug(f"[Tiler] Skipping tile at grid ({x}, {y}): does not intersect AOI polygon.")
                 continue
 
             centroid_lon = (min_lon + max_lon) / 2.0
@@ -196,6 +200,7 @@ def slice_and_filter_tiles(
 
             # Discard completely empty / nodata tiles located outside the satellite swath
             if np.all(tile_multiband == 0) or float(np.mean(tile_multiband)) < 1e-3:
+                logger.debug(f"[Tiler] Discarding tile at grid ({x}, {y}) site_key={site_key}: nodata / black array.")
                 continue
 
             # Resize to target 512x512 if effective crop size differs from target size

@@ -55,6 +55,7 @@ def ensure_schema_migrated(conn=None):
             ALTER TABLE tiles ADD COLUMN IF NOT EXISTS mean_ndwi FLOAT;
             ALTER TABLE tiles ADD COLUMN IF NOT EXISTS mean_ndbi FLOAT;
             ALTER TABLE tiles ADD COLUMN IF NOT EXISTS source_type TEXT DEFAULT 'aoi_search';
+            ALTER TABLE tiles ADD COLUMN IF NOT EXISTS mosaicked_scenes JSONB;
 
             CREATE INDEX IF NOT EXISTS tiles_ndvi_idx ON tiles (mean_ndvi);
             CREATE INDEX IF NOT EXISTS tiles_ndbi_idx ON tiles (mean_ndbi);
@@ -128,10 +129,11 @@ def upsert_tiles(
     sensor: str = "Sentinel-2",
     base_data_dir: str = "data",
     region_id: str = "custom_region",
+    mosaicked_scenes: Optional[List[str]] = None,
     conn=None
 ) -> int:
     """
-    Batch inserts or updates tile records with all real computed spectral indices and quality flags.
+    Batch inserts or updates tile records with all real computed spectral indices, quality flags, and mosaicked scene provenance.
     """
     if not tiles:
         return 0
@@ -146,6 +148,7 @@ def upsert_tiles(
     try:
         dt = datetime.fromisoformat(str(acquisition_date).replace("Z", "+00:00"))
         date_folder = dt.strftime("%Y-%m-%d")
+        mosaicked_scenes_json = json.dumps(mosaicked_scenes or [scene_id])
 
         with conn.cursor() as cur:
             sql = """
@@ -153,12 +156,13 @@ def upsert_tiles(
                 tile_id, scene_id, site_key, geometry,
                 centroid_lat, centroid_lon, acquisition_date, sensor,
                 cloud_pct, quality_confidence, file_path, thumbnail_path,
-                band_order, band_stats, mean_ndvi, mean_ndwi, mean_ndbi, source_type
+                band_order, band_stats, mean_ndvi, mean_ndwi, mean_ndbi, source_type,
+                mosaicked_scenes
             ) VALUES (
                 %s, %s, %s, ST_GeomFromText(%s, 4326),
                 %s, %s, %s, %s,
                 %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (tile_id) DO UPDATE SET
                 site_key = EXCLUDED.site_key,
@@ -176,7 +180,8 @@ def upsert_tiles(
                 mean_ndvi = EXCLUDED.mean_ndvi,
                 mean_ndwi = EXCLUDED.mean_ndwi,
                 mean_ndbi = EXCLUDED.mean_ndbi,
-                source_type = EXCLUDED.source_type;
+                source_type = EXCLUDED.source_type,
+                mosaicked_scenes = EXCLUDED.mosaicked_scenes;
             """
 
             records = []
@@ -202,7 +207,8 @@ def upsert_tiles(
                     t.mean_ndvi,
                     t.mean_ndwi,
                     t.mean_ndbi,
-                    t.source_type
+                    t.source_type,
+                    mosaicked_scenes_json
                 ))
 
             psycopg2.extras.execute_batch(cur, sql, records, page_size=100)

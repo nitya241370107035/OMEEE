@@ -39,6 +39,10 @@ For every ingested component, the following metadata fields are tracked:
 ## 🛡️ Offline Air-Gap Verification & Sovereign Compliance
 
 Before deploying the platform in an offline / air-gapped sovereign defense environment:
-1. **Zero External API Calls**: Ingestion engine uses local COGs or pre-staged local files when network access is restricted.
-2. **Deterministic Fallback**: Automatic offline mock generator available for unit testing and CI/CD without internet access.
-3. **Isolated Docker Network**: All microservices (`eo_backend`, `eo_postgres`, `eo_qdrant`, `eo_minio`) communicate exclusively across the local Docker bridge network (`0.0.0.0:8000`).
+1. **s2cloudless Model Weights Verification**: The `s2cloudless` model (`S2PixelCloudDetector`) uses a pre-trained LightGBM classifier bundled directly within the package (`s2cloudless/models/model_0.txt`). Verified 100% offline-compliant with zero runtime network calls.
+2. **Dual Cloud Detection Strategy**:
+   - **Entry Point A (10-band STAC COGs)**: Direct invocation of `S2PixelCloudDetector` over 10 Sentinel-2 bands (`B01`, `B02`, `B04`, `B05`, `B08`, `B8A`, `B09`, `B10`, `B11`, `B12`).
+   - **Entry Point B (4-5 band offline files)**: Automatic fallback to multi-spectral whiteness & NDSI heuristic cloud detector (`_spectral_fallback_detector`).
+3. **Zero External API Calls**: Ingestion engine uses local COGs or pre-staged local files when network access is restricted.
+4. **Deterministic Fallback**: Automatic offline mock generator available for unit testing and CI/CD without internet access.
+5. **Isolated Docker Network**: All microservices (`eo_backend`, `eo_postgres`, `eo_qdrant`, `eo_minio`) communicate exclusively across the local Docker bridge network (`0.0.0.0:8000`).

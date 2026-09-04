@@ -30,31 +30,31 @@ ON CONFLICT (scene_id) DO NOTHING;
 -- 2. Tiles — same site_key, two dates
 -- ============================================================
 INSERT INTO tiles (tile_id, scene_id, site_key, geometry, centroid_lat, centroid_lon,
-                    acquisition_date, sensor, cloud_pct, registration_residual,
-                    quality_confidence, embedding_version, cluster_id,
-                    band_count, bit_depth, file_size_bytes, file_path, thumbnail_path)
+                    acquisition_date, sensor, cloud_pct,
+                    quality_confidence, cluster_id,
+                    file_path, thumbnail_path)
 VALUES
   ('tile_demo_A_2021', 'scene_demo_2021', 'site_23.0225_72.5714',
    ST_GeomFromText('POLYGON((72.5714 23.0225, 72.5814 23.0225, 72.5814 23.0325, 72.5714 23.0325, 72.5714 23.0225))', 4326),
-   23.0275, 72.5764, '2021-03-10 05:30:00', 'sentinel2', 0.05, 0.6, 0.93,
-   'remoteclip_v1', 'cluster_industrial_01', 4, 16, 1258000,
+   23.0275, 72.5764, '2021-03-10 05:30:00', 'sentinel2', 0.05, 0.93,
+   'cluster_industrial_01',
    '/data/tiles/2021/tile_demo_A_2021.tif', '/data/tiles/2021/thumb_tile_demo_A_2021.jpg'),
   ('tile_demo_A_2024', 'scene_demo_2024', 'site_23.0225_72.5714',
    ST_GeomFromText('POLYGON((72.5714 23.0225, 72.5814 23.0225, 72.5814 23.0325, 72.5714 23.0325, 72.5714 23.0225))', 4326),
-   23.0275, 72.5764, '2024-03-12 05:30:00', 'sentinel2', 0.10, 0.8, 0.89,
-   'remoteclip_v1', 'cluster_industrial_01', 4, 16, 1301000,
+   23.0275, 72.5764, '2024-03-12 05:30:00', 'sentinel2', 0.10, 0.89,
+   'cluster_industrial_01',
    '/data/tiles/2024/tile_demo_A_2024.tif', '/data/tiles/2024/thumb_tile_demo_A_2024.jpg'),
   -- a second, nearby tile in the same cluster, for testing similarity_discovery
   ('tile_demo_B_2024', 'scene_demo_2024', 'site_23.0300_72.5850',
    ST_GeomFromText('POLYGON((72.5800 23.0250, 72.5900 23.0250, 72.5900 23.0350, 72.5800 23.0350, 72.5800 23.0250))', 4326),
-   23.0300, 72.5850, '2024-03-12 05:30:00', 'sentinel2', 0.08, 0.5, 0.91,
-   'remoteclip_v1', 'cluster_industrial_01', 4, 16, 1290000,
+   23.0300, 72.5850, '2024-03-12 05:30:00', 'sentinel2', 0.08, 0.91,
+   'cluster_industrial_01',
    '/data/tiles/2024/tile_demo_B_2024.tif', '/data/tiles/2024/thumb_tile_demo_B_2024.jpg'),
   -- a deliberately low-quality tile, for testing the quality gate / 2.2.3
   ('tile_demo_C_2024_cloudy', 'scene_demo_2024', 'site_23.0400_72.5600',
    ST_GeomFromText('POLYGON((72.5550 23.0350, 72.5650 23.0350, 72.5650 23.0450, 72.5550 23.0450, 72.5550 23.0350))', 4326),
-   23.0400, 72.5600, '2024-03-12 05:30:00', 'sentinel2', 0.78, 3.2, 0.21,
-   'remoteclip_v1', NULL, 4, 16, 1310000,
+   23.0400, 72.5600, '2024-03-12 05:30:00', 'sentinel2', 0.78, 0.21,
+   NULL,
    '/data/tiles/2024/tile_demo_C_2024_cloudy.tif', '/data/tiles/2024/thumb_tile_demo_C_2024_cloudy.jpg')
 ON CONFLICT (tile_id) DO NOTHING;
 

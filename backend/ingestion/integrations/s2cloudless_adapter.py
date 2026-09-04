@@ -44,8 +44,8 @@ def validate_s2cloudless_bands(band_names: List[str]) -> None:
     Raises:
         ValueError: If any required band is missing.
     """
-    available_set = set(band_names)
-    missing_bands = [b for b in S2CLOUDLESS_BANDS if b not in available_set]
+    available_upper = {b.upper() for b in band_names}
+    missing_bands = [b for b in S2CLOUDLESS_BANDS if b.upper() not in available_upper]
     if missing_bands:
         err_msg = (
             f"STOP PIPELINE ERROR: s2cloudless requires B01, B02, B04, B05, "
@@ -75,13 +75,13 @@ def prepare_s2cloudless_tensor(
 
     validate_s2cloudless_bands(canvas_data.band_names)
 
-    band_index_map = {name: idx for idx, name in enumerate(canvas_data.band_names)}
+    band_index_map = {name.upper(): idx for idx, name in enumerate(canvas_data.band_names)}
     h, w = canvas_data.height, canvas_data.width
 
     # Extract bands in exact s2cloudless order
     ordered_slices = []
     for band_name in required_bands:
-        idx = band_index_map[band_name]
+        idx = band_index_map[band_name.upper()]
         band_arr = canvas_data.data[idx].astype(np.float32)
         ordered_slices.append(band_arr)
 
@@ -111,13 +111,26 @@ def _spectral_fallback_detector(
     are unavailable or encountering binary incompatibility.
     """
     logger.warning("Using built-in spectral multi-band fallback cloud detector.")
-    band_map = {name: canvas_data.data[idx].astype(np.float32) for idx, name in enumerate(canvas_data.band_names)}
+    band_map = {name.upper(): canvas_data.data[idx].astype(np.float32) for idx, name in enumerate(canvas_data.band_names)}
     
-    blue = band_map.get("B02", band_map.get("blue"))
-    red = band_map.get("B04", band_map.get("red"))
-    green = band_map.get("B03", band_map.get("green", (blue + red) / 2.0))
-    nir = band_map.get("B08", band_map.get("nir", red))
-    swir = band_map.get("B11", red * 0.5)
+    blue = band_map.get("B02", band_map.get("BLUE"))
+    red = band_map.get("B04", band_map.get("RED"))
+    green = band_map.get("B03", band_map.get("GREEN", (blue + red) / 2.0 if (blue is not None and red is not None) else None))
+    nir = band_map.get("B08", band_map.get("NIR", red))
+    swir = band_map.get("B11", red * 0.5 if red is not None else None)
+
+    if blue is None or red is None:
+        # Fallback if band names don't map to standard RGB/NIR
+        vis_mean = np.mean(canvas_data.data[:min(3, canvas_data.data.shape[0])], axis=0).astype(np.float32)
+        blue = vis_mean
+        red = vis_mean
+        green = vis_mean
+        nir = vis_mean
+        swir = vis_mean * 0.5
+    else:
+        if green is None: green = (blue + red) / 2.0
+        if nir is None: nir = red
+        if swir is None: swir = red * 0.5
 
     vis_mean = (blue + green + red) / 3.0
     whiteness = (np.abs(red - vis_mean) + np.abs(green - vis_mean) + np.abs(blue - vis_mean)) / (vis_mean + 1e-5)
@@ -145,8 +158,8 @@ def run_s2cloudless_detector(
     Executes s2cloudless S2PixelCloudDetector if all 10 bands are present,
     or falls back to spectral cloud detection for 5-band/4-band/3-band canvases.
     """
-    available_set = set(canvas_data.band_names)
-    has_all_10_bands = all(b in available_set for b in S2CLOUDLESS_BANDS)
+    available_upper = {b.upper() for b in canvas_data.band_names}
+    has_all_10_bands = all(b.upper() in available_upper for b in S2CLOUDLESS_BANDS)
 
     if not has_all_10_bands:
         logger.info("[Phase 1.3] 5-band/4-band canvas detected; utilizing multi-spectral cloud & whiteness detector.")
@@ -185,4 +198,3 @@ def run_s2cloudless_detector(
     except Exception as exc:
         logger.warning(f"s2cloudless execution encountered error ({exc}). Falling back to spectral detector.")
         return _spectral_fallback_detector(canvas_data, threshold=threshold)
-

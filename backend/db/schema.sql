@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS tiles (
   mean_ndwi                                  FLOAT,              -- (Green - NIR) / (Green + NIR)
   mean_ndbi                                   FLOAT,              -- (SWIR - NIR) / (SWIR + NIR)
   source_type                                  TEXT DEFAULT 'aoi_search', -- 'aoi_search' or 'organiser_provided'
+  mosaicked_scenes                             JSONB,              -- list of contributing scene IDs for mosaicked tiles
   created_at                                    TIMESTAMP DEFAULT now()
 );
 

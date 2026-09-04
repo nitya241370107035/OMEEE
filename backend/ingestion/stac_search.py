@@ -68,6 +68,26 @@ class STACBandAssets:
         }
         return {k: v for k, v in mapping.items() if v}
 
+    def get_band_url(self, name: str) -> Optional[str]:
+        """Returns asset URL for a given band name (supports B01-B12 and color names)."""
+        target = name.upper()
+        mapping = {
+            "B01": self.b01, "COASTAL": self.b01,
+            "B02": self.blue, "BLUE": self.blue,
+            "B03": self.green, "GREEN": self.green,
+            "B04": self.red, "RED": self.red,
+            "B05": self.b05, "REDEDGE1": self.b05,
+            "B08": self.nir, "NIR": self.nir,
+            "B8A": self.b8a, "NARROW_NIR": self.b8a,
+            "B09": self.b09, "WATER_VAPOUR": self.b09,
+            "B10": self.b10, "CIRRUS": self.b10,
+            "B11": self.swir, "SWIR": self.swir,
+            "B12": self.b12, "SWIR2": self.b12,
+            "SCL": self.scl,
+            "VISUAL": self.visual, "TCI": self.visual
+        }
+        return mapping.get(target)
+
 
 @dataclass
 class STACSceneMetadata:
@@ -273,7 +293,8 @@ def search_multi_temporal_stac_scenes(
 ) -> List[STACSceneMetadata]:
     """
     Phase 1.1 Multi-Temporal STAC Search:
-    Splits date interval into sub-windows and retrieves the best low-cloud Sentinel-2 scene per bucket.
+    Splits date interval into sub-windows and retrieves low-cloud Sentinel-2 scenes per bucket.
+    May return one or more scenes per time bucket when an AOI spans granule boundaries.
 
     Args:
         bbox: Bounding box tuple (min_lon, min_lat, max_lon, max_lat).
@@ -286,7 +307,7 @@ def search_multi_temporal_stac_scenes(
         offline_fallback: If True, falls back to simulated offline scenes when network is down.
 
     Returns:
-        List[STACSceneMetadata]: One selected scene per time bucket.
+        List[STACSceneMetadata]: Selected scenes across time buckets (grouped by time_bucket).
     """
     buckets = split_date_range_into_buckets(date_from, date_to, num_buckets=num_buckets)
     logger.info(f"[Phase 1.1] Executing multi-temporal search across {len(buckets)} time bucket(s): {buckets}")

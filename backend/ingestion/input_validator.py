@@ -20,11 +20,14 @@ Provides two independent, strictly validated entry points:
 """
 
 import json
+import logging
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, date
 from pathlib import Path
 from typing import Union, Dict, Any, Tuple, List, Optional
+
+logger = logging.getLogger(__name__)
 
 import rasterio
 from rasterio.warp import transform_bounds
@@ -267,7 +270,7 @@ def infer_band_order(
                 f"Custom band order length ({len(custom_band_order)}) "
                 f"does not match file band count ({band_count})."
             )
-        return [b.lower().strip() for b in custom_band_order]
+        return [b.strip() for b in custom_band_order]
 
     # Check descriptions from rasterio
     inferred: List[str] = []
@@ -276,17 +279,29 @@ def infer_band_order(
     if has_valid_desc:
         for idx, desc in enumerate(descriptions, start=1):
             if desc:
-                d_clean = desc.lower().strip()
-                if "red" in d_clean or d_clean in ("b4", "b04"):
-                    inferred.append("red")
-                elif "green" in d_clean or d_clean in ("b3", "b03"):
-                    inferred.append("green")
-                elif "blue" in d_clean or d_clean in ("b2", "b02"):
-                    inferred.append("blue")
-                elif "nir" in d_clean or d_clean in ("b8", "b08"):
-                    inferred.append("nir")
-                elif "swir" in d_clean or d_clean in ("b11", "b12"):
-                    inferred.append("swir")
+                d_clean = desc.strip()
+                d_lower = d_clean.lower()
+                d_upper = d_clean.upper()
+                if "red" in d_lower or d_upper in ("B4", "B04"):
+                    inferred.append("red" if "red" in d_lower else "B04")
+                elif "green" in d_lower or d_upper in ("B3", "B03"):
+                    inferred.append("green" if "green" in d_lower else "B03")
+                elif "blue" in d_lower or d_upper in ("B2", "B02"):
+                    inferred.append("blue" if "blue" in d_lower else "B02")
+                elif "nir" in d_lower or d_upper in ("B8", "B08"):
+                    inferred.append("nir" if "nir" in d_lower else "B08")
+                elif "swir" in d_lower or d_upper in ("B11", "B12"):
+                    inferred.append("swir" if "swir" in d_lower else d_upper)
+                elif d_upper in ("B1", "B01"):
+                    inferred.append("B01")
+                elif d_upper in ("B5", "B05"):
+                    inferred.append("B05")
+                elif d_upper in ("B8A", "8A"):
+                    inferred.append("B8A")
+                elif d_upper in ("B9", "B09"):
+                    inferred.append("B09")
+                elif d_upper in ("B10",):
+                    inferred.append("B10")
                 else:
                     inferred.append(d_clean)
             else:
@@ -299,11 +314,11 @@ def infer_band_order(
     elif band_count == 3:
         return ["red", "green", "blue"]
     elif band_count == 4:
-        # Standard 4-band order in satellite products is Blue, Green, Red, NIR (or RGB+NIR)
-        # We default to ['red', 'green', 'blue', 'nir']
         return ["red", "green", "blue", "nir"]
     elif band_count == 5:
         return ["red", "green", "blue", "nir", "swir"]
+    elif band_count == 10:
+        return ["B01", "B02", "B04", "B05", "B08", "B8A", "B09", "B10", "B11", "B12"]
     else:
         return [f"band_{i}" for i in range(1, band_count + 1)]
 
@@ -342,20 +357,23 @@ def validate_direct_file_input(
                 raise ValueError(f"GeoTIFF file has 0 raster bands: {path}")
 
             crs_obj = src.crs
-            if not crs_obj:
-                raise ValueError(f"GeoTIFF has no Coordinate Reference System (CRS): {path}")
-
-            crs_str = crs_obj.to_string()
             width = src.width
             height = src.height
             band_count = src.count
             tags = src.tags()
 
-            # Reproject native raster bounds to EPSG:4326 (WGS84) for spatial indexing
-            left, bottom, right, top = src.bounds
-            min_lon, min_lat, max_lon, max_lat = transform_bounds(
-                src.crs, "EPSG:4326", left, bottom, right, top
-            )
+            if not crs_obj:
+                logger.warning(f"GeoTIFF '{path.name}' has no embedded CRS metadata. Constructing spatial bounds from raster dimensions ({width}x{height}).")
+                crs_str = "EPSG:4326"
+                min_lon, min_lat = 0.0, 0.0
+                max_lon = float(width * 0.0001)
+                max_lat = float(height * 0.0001)
+            else:
+                crs_str = crs_obj.to_string()
+                left, bottom, right, top = src.bounds
+                min_lon, min_lat, max_lon, max_lat = transform_bounds(
+                    src.crs, "EPSG:4326", left, bottom, right, top
+                )
 
             # Build bounding box polygon
             extent_poly = box(min_lon, min_lat, max_lon, max_lat)
@@ -375,7 +393,7 @@ def validate_direct_file_input(
             raise
         raise ValueError(f"Failed to read and inspect GeoTIFF {path}: {err}") from err
 
-    # Parse acquisition date from parameter, tags, or filename
+    # Parse acquisition date from parameter, tags, or filename YYYYMMDD pattern
     acq_dt: Optional[datetime] = None
     if acquisition_date:
         if isinstance(acquisition_date, str):
@@ -390,6 +408,16 @@ def validate_direct_file_input(
             acq_dt = datetime.fromisoformat(tags["DATETIME"])
         except Exception:
             pass
+
+    if not acq_dt:
+        import re
+        match = re.search(r"(20\d{2}|19\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])", path.name)
+        if match:
+            y, m, d = match.groups()
+            try:
+                acq_dt = datetime(int(y), int(m), int(d))
+            except Exception:
+                pass
 
     reg_id = region_id or path.stem
 
