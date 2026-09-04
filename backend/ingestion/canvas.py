@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 # ~10 meters in EPSG:4326 degrees (at equator)
 DEFAULT_PIXEL_RES_DEG = 0.00008983
+DEFAULT_BUFFER_PCT = 0.05
 
 # 5 Core Bands for Visuals, Vegetation (NDVI), Water (NDWI), and Built-Up (NDBI)
 DEFAULT_5_BANDS = ["blue", "green", "red", "nir", "swir"]
@@ -105,25 +106,16 @@ def calculate_buffered_bbox(
 def assemble_canvas_from_stac(
     scene_meta: STACSceneMetadata,
     aoi_bbox: Tuple[float, float, float, float],
-    buffer_pct: float = 0.05,
+    buffer_pct: float = DEFAULT_BUFFER_PCT,
     pixel_res_deg: float = DEFAULT_PIXEL_RES_DEG
 ) -> CanvasData:
     """
-    Entry Point A Canvas Assembler:
-    Streams 5 bands (Blue, Green, Red, NIR, SWIR) from STAC COGs and reprojects to EPSG:4326.
-    Also streams 10m True Color Image (TCI) for crystal-clear visual RGB rendering when available.
+    Phase 1.2 Canvas Assembler:
+    Streams real spectral bands from remote Cloud-Optimized GeoTIFFs (COGs)
+    using rasterio WarpedVRT reprojection to EPSG:4326.
     """
     buffered_bbox = calculate_buffered_bbox(aoi_bbox, buffer_pct=buffer_pct)
     min_lon, min_lat, max_lon, max_lat = buffered_bbox
-
-    # If mock scene or remote URLs are unavailable/offline, generate synthetic 5-band canvas
-    if scene_meta.is_mock or not scene_meta.assets.red.startswith(("http://", "https://", "file://", "s3://")):
-        logger.info("[Phase 1.2] Using synthetic 5-band canvas generator for offline/mock scene.")
-        return generate_synthetic_canvas(
-            buffered_bbox=buffered_bbox,
-            pixel_res_deg=pixel_res_deg,
-            cloud_pct_target=scene_meta.cloud_cover / 100.0
-        )
 
     width = max(512, int(round((max_lon - min_lon) / pixel_res_deg)))
     height = max(512, int(round((max_lat - min_lat) / pixel_res_deg)))
@@ -139,10 +131,13 @@ def assemble_canvas_from_stac(
     ]
 
     env_params = {
-        "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tif",
+        "AWS_NO_SIGN_REQUEST": "YES",
+        "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tif,.TIF",
         "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
-        "GDAL_HTTP_MAX_RETRY": "5",
-        "GDAL_HTTP_RETRY_DELAY": "1",
+        "GDAL_HTTP_MAX_RETRY": "3",
+        "GDAL_HTTP_RETRY_DELAY": "2",
+        "GDAL_HTTP_TIMEOUT": "15",
+        "GDAL_HTTP_CONNECTTIMEOUT": "10",
     }
 
     canvas_layers = []
@@ -158,7 +153,7 @@ def assemble_canvas_from_stac(
                                    width=width, height=height, resampling=Resampling.bilinear) as vrt:
                         tci_raw = vrt.read(out_shape=(3, height, width), resampling=Resampling.bilinear)
                         visual_rgb = tci_raw.astype(np.float32)
-                        logger.info(f"[Phase 1.2] Successfully streamed 10m True Color Image (TCI) ({width}x{height})")
+                        logger.info(f"[Phase 1.2] Streamed 10m True Color Image (TCI) ({width}x{height})")
             except Exception as e:
                 logger.warning(f"[Phase 1.2] Could not stream visual TCI asset: {e}")
 
@@ -178,9 +173,11 @@ def assemble_canvas_from_stac(
             except Exception as e:
                 logger.warning(f"[Phase 1.2] Failed to stream band '{b_name}' from {b_url}: {e}")
 
-    if not canvas_layers:
-        logger.warning("[Phase 1.2] STAC band streaming failed. Falling back to synthetic 5-band canvas.")
-        return generate_synthetic_canvas(buffered_bbox, pixel_res_deg, scene_meta.cloud_cover / 100.0)
+    if not canvas_layers or len(canvas_layers) < 3:
+        raise RuntimeError(
+            f"Failed to stream required spectral bands for scene {scene_meta.scene_id}. "
+            f"Only {len(canvas_layers)} bands loaded: {loaded_band_names}"
+        )
 
     canvas_array = np.stack(canvas_layers, axis=0)
 
@@ -208,7 +205,7 @@ def assemble_canvas_from_file(
 ) -> CanvasData:
     """
     Entry Point B Canvas Assembler:
-    Reads local evaluation GeoTIFF with ZERO network calls, reprojecting to EPSG:4326.
+    Reads local evaluation GeoTIFF directly, reprojecting to EPSG:4326.
     """
     min_lon, min_lat, max_lon, max_lat = file_input.bounds_wgs84
     width = max(512, int(round((max_lon - min_lon) / pixel_res_deg)))
@@ -233,61 +230,7 @@ def assemble_canvas_from_file(
     )
 
 
-# ============================================================
-# 3. Synthetic 5-Band Canvas Generator (Offline/Fallback)
-# ============================================================
-
-def generate_synthetic_canvas(
-    buffered_bbox: Tuple[float, float, float, float],
-    pixel_res_deg: float = DEFAULT_PIXEL_RES_DEG,
-    cloud_pct_target: float = 0.05
-) -> CanvasData:
-    """Generates a realistic 5-band synthetic canvas (Blue, Green, Red, NIR, SWIR)."""
-    min_lon, min_lat, max_lon, max_lat = buffered_bbox
-    width = max(512, int(round((max_lon - min_lon) / pixel_res_deg)))
-    height = max(512, int(round((max_lat - min_lat) / pixel_res_deg)))
-    transform = from_bounds(min_lon, min_lat, max_lon, max_lat, width, height)
-
-    np.random.seed(42)
-
-    # Base ground reflectances
-    red = np.random.normal(loc=1200, scale=300, size=(height, width)).clip(200, 6000)
-    green = np.random.normal(loc=1100, scale=250, size=(height, width)).clip(200, 5000)
-    blue = np.random.normal(loc=900, scale=200, size=(height, width)).clip(100, 4000)
-    nir = np.random.normal(loc=2500, scale=600, size=(height, width)).clip(300, 9000)
-    swir = np.random.normal(loc=1800, scale=400, size=(height, width)).clip(200, 7000)
-
-    # Add synthetic clouds if target > 0
-    if cloud_pct_target > 0.01:
-        num_clouds = max(1, int(cloud_pct_target * 20))
-        for _ in range(num_clouds):
-            cy, cx = np.random.randint(0, height), np.random.randint(0, width)
-            radius = np.random.randint(20, 70)
-            y, x = np.ogrid[:height, :width]
-            dist = np.sqrt((x - cx) ** 2 + (y - cy) ** 2)
-            mask = dist <= radius
-            # High visible + NIR reflectance for cloud
-            red[mask] = 8000 + np.random.normal(0, 500, size=np.sum(mask))
-            green[mask] = 8000 + np.random.normal(0, 500, size=np.sum(mask))
-            blue[mask] = 8500 + np.random.normal(0, 500, size=np.sum(mask))
-            nir[mask] = 8000 + np.random.normal(0, 500, size=np.sum(mask))
-            swir[mask] = 3000 + np.random.normal(0, 300, size=np.sum(mask))
-
-    data = np.stack([blue, green, red, nir, swir], axis=0).astype(np.float32)
-
-    return CanvasData(
-        data=data,
-        band_names=["blue", "green", "red", "nir", "swir"],
-        transform=transform,
-        crs="EPSG:4326",
-        bbox=buffered_bbox,
-        height=height,
-        width=width,
-        source_type="synthetic"
-    )
-
-
-# Backward compatibility unified entry
+# Unified entry point dispatcher
 def assemble_working_canvas(
     scene_meta_or_file: Union[STACSceneMetadata, ValidatedFileInput],
     aoi_bbox: Optional[Tuple[float, float, float, float]] = None,

@@ -169,3 +169,45 @@ def get_encoder() -> RemoteCLIPEncoder:
     if _global_encoder is None:
         _global_encoder = RemoteCLIPEncoder()
     return _global_encoder
+
+
+# ============================================================
+# Phase 2.1 — Query Encoding Top-Level Functions
+# ============================================================
+
+def encode_query_text(text: str) -> List[float]:
+    """
+    Encode an analyst natural language query text into a 512-dim L2-normalized vector
+    with RemoteCLIP aerial prompt template ensembling for maximum cross-modal alignment.
+    """
+    encoder = get_encoder()
+    clean_text = text.strip()
+    if not clean_text:
+        return [0.0] * EMBEDDING_DIM
+
+    # Multi-template aerial prompt expansion (boosts cross-modal alignment)
+    prompts = [
+        clean_text,
+        f"satellite imagery of {clean_text}",
+        f"aerial view of {clean_text}",
+        f"satellite photo showing {clean_text}"
+    ]
+    embs = encoder.encode_text(prompts)
+    embs_arr = np.array(embs)
+    avg_vec = np.mean(embs_arr, axis=0)
+    norm = np.linalg.norm(avg_vec)
+    if norm > 0:
+        avg_vec = avg_vec / norm
+    return avg_vec.tolist()
+
+
+def encode_query_image(
+    image_input: Union[str, Image.Image, np.ndarray, bytes, io.BytesIO]
+) -> List[float]:
+    """
+    Encode a reference query satellite image (path, bytes, PIL, or numpy array)
+    into a 512-dim L2-normalized vector. Reuses the application singleton encoder.
+    """
+    encoder = get_encoder()
+    return encoder.encode_image(image_input)
+

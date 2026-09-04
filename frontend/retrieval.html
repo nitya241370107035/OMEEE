@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AeroLens — Multimodal Semantic Satellite Image Retrieval</title>
+  
+  <!-- Leaflet CSS for Footprint previews if needed -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  
+  <!-- App Stylesheet -->
+  <link rel="stylesheet" href="/frontend/index.css">
+  <style>
+    .nav-item.active {
+      background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(99, 102, 241, 0.25));
+      border-color: var(--border-active);
+      color: #38bdf8;
+    }
+  </style>
+
+  <!-- Immediate Global Fallback for Thumbnail Errors -->
+  <script>
+    function handleTileThumbError(img, tileId) {
+      if (!img) return;
+      img.onerror = null;
+      const cleanId = (tileId || 'Sentinel-2 Tile').toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">' +
+        '<rect width="512" height="512" fill="#0d1424"/>' +
+        '<defs>' +
+          '<radialGradient id="grad" cx="50%" cy="50%" r="50%">' +
+            '<stop offset="0%" stop-color="#1e293b"/>' +
+            '<stop offset="100%" stop-color="#070a12"/>' +
+          '</radialGradient>' +
+          '<pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">' +
+            '<path d="M 32 0 L 0 0 0 32" fill="none" stroke="rgba(6,182,212,0.12)" stroke-width="1"/>' +
+          '</pattern>' +
+        '</defs>' +
+        '<rect width="512" height="512" fill="url(#grad)"/>' +
+        '<rect width="512" height="512" fill="url(#grid)"/>' +
+        '<circle cx="256" cy="256" r="140" fill="none" stroke="rgba(6,182,212,0.25)" stroke-width="2" stroke-dasharray="6,6"/>' +
+        '<line x1="256" y1="80" x2="256" y2="432" stroke="rgba(6,182,212,0.3)" stroke-width="1.5"/>' +
+        '<line x1="80" y1="256" x2="432" y2="256" stroke="rgba(6,182,212,0.3)" stroke-width="1.5"/>' +
+        '<text x="256" y="240" font-family="monospace" font-size="28" fill="#38bdf8" text-anchor="middle" font-weight="bold">🛰️ SENTINEL-2</text>' +
+        '<text x="256" y="275" font-family="monospace" font-size="14" fill="#94a3b8" text-anchor="middle">512x512 MULTI-SPECTRAL</text>' +
+        '<text x="256" y="300" font-family="monospace" font-size="12" fill="#06b6d4" text-anchor="middle">' + cleanId + '</text>' +
+      '</svg>';
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    }
+  </script>
+</head>
+<body>
+
+  <!-- Top Aerospace Navigation Bar -->
+  <header>
+    <div class="logo-section">
+      <div class="logo-badge">🛰️</div>
+      <div>
+        <div class="logo-title">AEROLENS &bull; EO SEMANTIC RETRIEVAL</div>
+        <div class="logo-subtitle">MULTIMODAL REMOTECLIP ViT-B-32 &bull; DEFENSE DGIS</div>
+      </div>
+    </div>
+
+    <!-- Multi-Page Navigation -->
+    <nav class="nav-links">
+      <a href="/" class="nav-item" id="nav-map" style="text-decoration: none;">
+        <span>🗺️</span> Map & Coverage
+      </a>
+      <a href="/retrieval.html" class="nav-item active" id="nav-retrieval" style="text-decoration: none;">
+        <span>🔍</span> Semantic Retrieval
+      </a>
+      <a href="/change.html" class="nav-item" id="nav-change" style="text-decoration: none;">
+        <span>🔄</span> Change Detection
+      </a>
+      <a href="/clustering.html" class="nav-item" id="nav-clustering" style="text-decoration: none;">
+        <span>📊</span> Clustering
+      </a>
+      <a href="/review.html" class="nav-item" id="nav-review" style="text-decoration: none;">
+        <span>📝</span> Review Tool
+      </a>
+    </nav>
+
+    <!-- Header Right Stats -->
+    <div class="header-status">
+      <a href="/" class="ingest-aoi-nav-btn" style="text-decoration: none;">
+        <span>🗺️</span> Open Map Explorer
+      </a>
+      <span class="tag-badge">RemoteCLIP ViT-B-32</span>
+      <span class="tag-badge">Qdrant Vector DB</span>
+    </div>
+  </header>
+
+  <!-- Main Retrieval Container -->
+  <div class="content-container" style="position: relative; overflow: hidden;">
+    <div class="retrieval-container">
+      
+      <!-- Chat History Feed -->
+      <div class="chat-feed" id="retrievalChatFeed">
+        
+        <!-- Welcome Greeting Bubble -->
+        <div class="chat-message assistant">
+          <div class="chat-avatar">🛰️</div>
+          <div class="chat-bubble">
+            <div class="chat-bubble-header">
+              <span class="assistant-name">AeroLens Neural Search Agent</span>
+              <span class="assistant-meta">RemoteCLIP ViT-B-32 &bull; 512-dim Cosine Sim &bull; PostGIS GIST</span>
+            </div>
+            <div class="chat-text">
+              Welcome to the <strong>Multimodal Semantic Retrieval Workspace</strong>. You can query the multi-temporal satellite archive using natural language descriptions, complex geographic tactical concepts, or by uploading reference satellite images.
+            </div>
+
+            <!-- Starter Prompt Suggestions -->
+            <div class="quick-prompts-title">Try instant queries:</div>
+            <div class="quick-prompts-grid">
+              <button class="quick-prompt-chip" onclick="applyQuickPrompt('Airstrip runway with visible hangars and aircraft parking')">
+                ✈️ Airstrips & Hangars
+              </button>
+              <button class="quick-prompt-chip" onclick="applyQuickPrompt('River bend with bridge infrastructure and transport corridors')">
+                🌊 River Bend & Bridges
+              </button>
+              <button class="quick-prompt-chip" onclick="applyQuickPrompt('Industrial construction site with heavy storage yards')">
+                🏗️ Industrial Construction
+              </button>
+              <button class="quick-prompt-chip" onclick="applyQuickPrompt('Dense agricultural crop fields with irrigation patterns')">
+                🌾 Agricultural Fields
+              </button>
+              <button class="quick-prompt-chip" onclick="applyQuickPrompt('Dense urban residential buildings and road networks')">
+                🏙️ Urban Built-Up
+              </button>
+              <button class="quick-prompt-chip" onclick="applyQuickPrompt('Open barren land with vehicle movement tracks')">
+                🚜 Open Barren Land
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Sticky Bottom Input Bar -->
+      <div class="retrieval-input-wrapper">
+        
+        <!-- Image Attachment Preview Chip -->
+        <div class="image-attachment-chip" id="searchImageAttachmentPreview" style="display: none;">
+          <span id="attachedImageName">📷 reference_image.jpg</span>
+          <button class="remove-attachment-btn" onclick="clearAttachedSearchImage()">&times;</button>
+        </div>
+
+        <!-- Filter Configuration Popover Panel -->
+        <div class="search-filter-popover" id="searchFilterPopover" style="display: none;">
+          <div class="popover-header">
+            <h4>🎯 Retrieval Filters</h4>
+            <button class="popover-close-btn" onclick="toggleSearchFilterPopover()">&times;</button>
+          </div>
+          <div class="popover-grid">
+            <div class="form-group">
+              <label>Top Results (top_k): <span id="topKValueLabel" style="color: var(--accent-cyan);">5</span></label>
+              <input type="range" id="filterTopK" min="1" max="20" value="5" oninput="document.getElementById('topKValueLabel').innerText = this.value">
+            </div>
+            <div class="form-group">
+              <label>Sensor Constraint</label>
+              <select id="filterSensor">
+                <option value="" selected>Any Sensor (All)</option>
+                <option value="Sentinel-2">Sentinel-2 (10m Multi-Spectral)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Start Date (From)</label>
+              <input type="date" id="filterStartDate">
+            </div>
+            <div class="form-group">
+              <label>End Date (To)</label>
+              <input type="date" id="filterEndDate">
+            </div>
+            <div class="form-group">
+              <label>Min Quality Confidence</label>
+              <input type="number" id="filterMinQuality" min="0.0" max="1.0" step="0.1" value="0.0">
+            </div>
+            <div class="form-group">
+              <label>Max Cloud Cover (%)</label>
+              <input type="number" id="filterMaxCloud" min="0" max="100" value="100">
+            </div>
+          </div>
+          <div style="margin-top: 10px; display: flex; justify-content: flex-end; gap: 8px;">
+            <button class="map-btn" style="padding: 4px 12px; font-size: 11px;" onclick="resetSearchFilters()">Reset Filters</button>
+            <button class="map-btn primary" style="padding: 4px 14px; font-size: 11px;" onclick="toggleSearchFilterPopover()">Apply</button>
+          </div>
+        </div>
+
+        <!-- Main Input Row -->
+        <div class="retrieval-input-bar">
+          
+          <!-- Filter Trigger -->
+          <button class="filter-toggle-btn" id="filterToggleBtn" onclick="toggleSearchFilterPopover()" title="Adjust search filters (top_k, date, sensor)">
+            <span>⚙️</span>
+          </button>
+
+          <!-- Reference Image Upload Trigger -->
+          <input type="file" id="searchImageFileInput" accept="image/*,.tif,.tiff" style="display: none;" onchange="onSearchImageSelected(event)">
+          <button class="image-upload-trigger-btn" onclick="document.getElementById('searchImageFileInput').click()" title="Search by Reference Image">
+            <span>📷</span>
+          </button>
+
+          <!-- Text Prompt Input -->
+          <input 
+            type="text" 
+            id="searchPromptInput" 
+            class="retrieval-text-input" 
+            placeholder="Ask anything (e.g. 'find airstrips near river bends', 'dense forest with water bodies')..."
+            onkeydown="if(event.key === 'Enter') submitSemanticSearch()"
+          >
+
+          <!-- Submit Button -->
+          <button class="retrieval-submit-btn" id="submitSearchBtn" onclick="submitSemanticSearch()">
+            <span>Search</span>
+            <span>⚡</span>
+          </button>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============================================================
+       TILE DETAIL & INSPECTION MODAL (PHASE 2.7)
+       ============================================================ -->
+  <div class="modal-backdrop" id="tileInspectModal" style="display: none;">
+    <div class="modal-card inspect-modal-card">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 20px;">🔍</span>
+          <div>
+            <h3 id="inspectTileTitle" style="font-size: 16px; font-weight: 700;">Tile Inspection & Lineage</h3>
+            <span id="inspectTileSubtitle" style="font-size: 12px; color: var(--text-muted);">Sentinel-2 L2A &bull; 512x512 GeoTIFF</span>
+          </div>
+        </div>
+        <button class="modal-close-btn" onclick="closeTileInspect()">&times;</button>
+      </div>
+
+      <div class="modal-body inspect-modal-body">
+        <!-- Preview & Media Column -->
+        <div class="inspect-media-column">
+          <div class="inspect-img-wrap">
+            <img id="inspectTileImage" src="" alt="Tile Preview" onerror="handleTileThumbError(this, 'Tile')">
+            <div class="inspect-score-badge" id="inspectScoreBadge">95.4% Match</div>
+          </div>
+
+          <!-- Spot Description -->
+          <div class="inspect-description-box" id="inspectDescriptionBox">
+            "This location shows sparse vegetation (NDVI 0.18), no significant water (NDWI -0.05), and built-up areas likely dominant (NDBI 0.22)"
+          </div>
+
+          <div class="inspect-action-buttons">
+            <button class="map-btn primary" id="inspectOpenMapBtn" onclick="inspectOpenInMapClicked()">
+              🗺️ Open in Map View
+            </button>
+            <a id="inspectDownloadTifBtn" href="#" download class="map-btn" style="text-decoration: none; text-align: center;">
+              💾 Download GeoTIFF (.tif)
+            </a>
+          </div>
+        </div>
+
+        <!-- Spectral & Lineage Column -->
+        <div class="inspect-details-column">
+          <h4 style="color: var(--accent-cyan); font-size: 13px; text-transform: uppercase; margin-bottom: 10px;">Multi-Spectral Indices</h4>
+          
+          <div class="spectral-meter-card">
+            <div class="spectral-meter-row">
+              <span class="meter-label">NDVI (Vegetation)</span>
+              <span class="meter-val" id="inspectValNdvi">0.42</span>
+            </div>
+            <div class="meter-bar-track">
+              <div class="meter-bar-fill fill-ndvi" id="inspectBarNdvi" style="width: 71%;"></div>
+            </div>
+          </div>
+
+          <div class="spectral-meter-card">
+            <div class="spectral-meter-row">
+              <span class="meter-label">NDWI (Water / Moisture)</span>
+              <span class="meter-val" id="inspectValNdwi">0.15</span>
+            </div>
+            <div class="meter-bar-track">
+              <div class="meter-bar-fill fill-ndwi" id="inspectBarNdwi" style="width: 57%;"></div>
+            </div>
+          </div>
+
+          <div class="spectral-meter-card">
+            <div class="spectral-meter-row">
+              <span class="meter-label">NDBI (Built-Up Urban)</span>
+              <span class="meter-val" id="inspectValNdbi">-0.08</span>
+            </div>
+            <div class="meter-bar-track">
+              <div class="meter-bar-fill fill-ndbi" id="inspectBarNdbi" style="width: 46%;"></div>
+            </div>
+          </div>
+
+          <h4 style="color: var(--accent-cyan); font-size: 13px; text-transform: uppercase; margin-top: 16px; margin-bottom: 10px;">Geospatial & Metadata Lineage</h4>
+          <table class="inspect-metadata-table">
+            <tr>
+              <td>Tile Identifier:</td>
+              <td id="inspectMetaTileId" class="mono-val">tile_0000_0000</td>
+            </tr>
+            <tr>
+              <td>Scene ID:</td>
+              <td id="inspectMetaSceneId" class="mono-val">S2A_MSIL2A_...</td>
+            </tr>
+            <tr>
+              <td>Acquisition Date:</td>
+              <td id="inspectMetaDate">2024-05-15</td>
+            </tr>
+            <tr>
+              <td>Centroid Lat/Lon:</td>
+              <td id="inspectMetaCoords" class="mono-val">23.0225° N, 72.5714° E</td>
+            </tr>
+            <tr>
+              <td>Cloud Contamination:</td>
+              <td id="inspectMetaCloud">0.0%</td>
+            </tr>
+            <tr>
+              <td>Quality Confidence:</td>
+              <td id="inspectMetaQuality">1.00 (Gated)</td>
+            </tr>
+            <tr>
+              <td>Coordinate System:</td>
+              <td class="mono-val">EPSG:4326 (WGS84)</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaflet JS & Shared App JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="/frontend/app.js?v=20240903_3"></script>
+</body>
+</html>

@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from backend.api.routers.coverage import router as coverage_router
 from backend.api.routers.ingest import router as ingest_router
 from backend.api.routers.archive import router as archive_router
+from backend.api.routers.search import router as search_router
 
 app = FastAPI(
     title="Satellite Imagery Semantic Retrieval & Change Detection API",
@@ -28,6 +29,7 @@ app.add_middleware(
 app.include_router(coverage_router)
 app.include_router(ingest_router)
 app.include_router(archive_router)
+app.include_router(search_router)
 
 # Mount Data & Static directories if they exist
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -51,6 +53,42 @@ def read_root():
         "service": "Satellite Imagery Semantic Retrieval & Change Detection API",
         "docs": "/docs"
     }
+
+
+@app.get("/retrieval")
+@app.get("/retrieval.html")
+def read_retrieval_page():
+    retrieval_file = frontend_dir / "retrieval.html"
+    if retrieval_file.exists():
+        return FileResponse(str(retrieval_file))
+    return FileResponse(str(frontend_dir / "index.html"))
+
+
+@app.get("/change")
+@app.get("/change.html")
+def read_change_page():
+    change_file = frontend_dir / "change.html"
+    if change_file.exists():
+        return FileResponse(str(change_file))
+    return FileResponse(str(frontend_dir / "index.html"))
+
+
+@app.get("/clustering")
+@app.get("/clustering.html")
+def read_clustering_page():
+    clustering_file = frontend_dir / "clustering.html"
+    if clustering_file.exists():
+        return FileResponse(str(clustering_file))
+    return FileResponse(str(frontend_dir / "index.html"))
+
+
+@app.get("/review")
+@app.get("/review.html")
+def read_review_page():
+    review_file = frontend_dir / "review.html"
+    if review_file.exists():
+        return FileResponse(str(review_file))
+    return FileResponse(str(frontend_dir / "index.html"))
 
 
 @app.get("/health")

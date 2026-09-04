@@ -126,19 +126,32 @@ def compute_spectral_indices(
     return mean_ndvi, mean_ndwi, mean_ndbi, band_stats
 
 
+def _get_grid_steps(total_dim: int, window_size: int, stride: int) -> List[int]:
+    """
+    Computes equidistant sliding window start offsets ensuring full 100% boundary coverage
+    with uniform spacing and ZERO identical/duplicate tile slices.
+    """
+    if total_dim <= window_size:
+        return [0]
+    
+    num_steps = max(2, int(np.ceil((total_dim - window_size) / float(stride))) + 1)
+    offsets = np.linspace(0, total_dim - window_size, num_steps, dtype=int)
+    return sorted(list(set(offsets.tolist())))
+
+
 def slice_and_filter_tiles(
     canvas_data: CanvasData,
     cleaned_canvas: CleanedCanvas,
     scene_id: str,
     aoi_polygon: Optional[Union[Polygon, MultiPolygon]] = None,
     ground_crop_size: int = DEFAULT_GROUND_CROP_SIZE,
-    overlap_pct: float = 0.10,
+    overlap_pct: float = 0.15,
     target_size: int = TARGET_TILE_SIZE,
     source_type: str = "aoi_search"
 ) -> List[TileCandidate]:
     """
-    Slices the multi-band working canvas into 512x512 tiles, computes indices,
-    and filters against the AOI polygon (if provided).
+    Slices the multi-band working canvas into distinct 512x512 tiles, computes indices,
+    and filters against the AOI polygon (if provided) ensuring complete, non-duplicated coverage.
     """
     c_height, c_width = canvas_data.height, canvas_data.width
     c_transform = canvas_data.transform
@@ -147,15 +160,21 @@ def slice_and_filter_tiles(
     rgb = cleaned_canvas.rgb_normalized
     bad_mask = cleaned_canvas.bad_mask
 
-    stride = max(1, int(round(ground_crop_size * (1.0 - overlap_pct))))
+    # Adapt effective crop size if the canvas itself is smaller than 512x512
+    eff_crop_size = min(ground_crop_size, min(c_height, c_width))
+    stride = max(1, int(round(eff_crop_size * (1.0 - overlap_pct))))
+
+    y_steps = _get_grid_steps(c_height, eff_crop_size, stride)
+    x_steps = _get_grid_steps(c_width, eff_crop_size, stride)
+
     tiles: List[TileCandidate] = []
     tile_index = 1
 
-    for y in range(0, c_height - ground_crop_size + 1, stride):
-        for x in range(0, c_width - ground_crop_size + 1, stride):
+    for y in y_steps:
+        for x in x_steps:
             # Compute tile bounds in EPSG:4326
             min_lon, max_lat = c_transform * (x, y)
-            max_lon, min_lat = c_transform * (x + ground_crop_size, y + ground_crop_size)
+            max_lon, min_lat = c_transform * (x + eff_crop_size, y + eff_crop_size)
             tile_bounds = (min_lon, min_lat, max_lon, max_lat)
             tile_poly = box(min_lon, min_lat, max_lon, max_lat)
 
@@ -167,20 +186,20 @@ def slice_and_filter_tiles(
             centroid_lat = (min_lat + max_lat) / 2.0
             site_key = generate_site_key(centroid_lat, centroid_lon)
 
-            # Extract window arrays
-            tile_bad_mask = bad_mask[y:y + ground_crop_size, x:x + ground_crop_size]
+            # Extract window arrays with exact effective crop dimensions
+            tile_bad_mask = bad_mask[y:y + eff_crop_size, x:x + eff_crop_size]
             tile_cloud_pct = float(np.count_nonzero(tile_bad_mask)) / float(tile_bad_mask.size)
             quality_conf = max(0.0, min(1.0, 1.0 - tile_cloud_pct))
 
-            tile_multiband = raw_multiband[:, y:y + ground_crop_size, x:x + ground_crop_size]
-            tile_rgb = rgb[:, y:y + ground_crop_size, x:x + ground_crop_size]
+            tile_multiband = raw_multiband[:, y:y + eff_crop_size, x:x + eff_crop_size]
+            tile_rgb = rgb[:, y:y + eff_crop_size, x:x + eff_crop_size]
 
             # Discard completely empty / nodata tiles located outside the satellite swath
             if np.all(tile_multiband == 0) or float(np.mean(tile_multiband)) < 1e-3:
                 continue
 
-            # Resize to target 512x512 if ground crop size differs
-            if ground_crop_size != target_size:
+            # Resize to target 512x512 if effective crop size differs from target size
+            if eff_crop_size != target_size:
                 # Resize RGB
                 pil_rgb = Image.fromarray(np.transpose(tile_rgb, (1, 2, 0)))
                 pil_rgb_resized = pil_rgb.resize((target_size, target_size), Image.Resampling.BILINEAR)

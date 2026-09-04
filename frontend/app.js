@@ -407,13 +407,16 @@ window.startIngestion = async function() {
         throw new Error("Invalid GeoJSON JSON syntax. Please verify coordinates format.");
       }
 
+      const dateFromVal = document.getElementById('aoiDateFrom')?.value?.trim();
+      const dateToVal = document.getElementById('aoiDateTo')?.value?.trim();
+
       const payload = {
         geojson_polygon: parsedGeojson,
-        region_id: document.getElementById('aoiRegionId').value.trim() || undefined,
-        region_name: document.getElementById('aoiRegionName').value.trim() || undefined,
-        date_from: document.getElementById('aoiDateFrom').value,
-        date_to: document.getElementById('aoiDateTo').value,
-        num_time_buckets: parseInt(document.getElementById('aoiBuckets').value, 10) || 2,
+        region_id: document.getElementById('aoiRegionId')?.value?.trim() || undefined,
+        region_name: document.getElementById('aoiRegionName')?.value?.trim() || undefined,
+        date_from: dateFromVal && dateFromVal !== "" ? dateFromVal : undefined,
+        date_to: dateToVal && dateToVal !== "" ? dateToVal : undefined,
+        num_time_buckets: parseInt(document.getElementById('aoiBuckets')?.value, 10) || 2,
         populate_db: true
       };
 
@@ -477,9 +480,495 @@ window.startIngestion = async function() {
 };
 
 // ============================================================
-// 7. INITIALIZE ON DOM LOAD
+// 8. PHASE 2.7 — SEMANTIC RETRIEVAL CHAT & TILE INSPECTOR
+// ============================================================
+
+let attachedSearchFile = null;
+let currentSearchResults = [];
+let currentInspectingTile = null;
+let mapTileHighlightLayer = null;
+
+window.toggleSearchFilterPopover = function() {
+  const popover = document.getElementById('searchFilterPopover');
+  if (!popover) return;
+  const isHidden = popover.style.display === 'none' || popover.style.display === '';
+  popover.style.display = isHidden ? 'block' : 'none';
+};
+
+window.resetSearchFilters = function() {
+  document.getElementById('filterTopK').value = 5;
+  document.getElementById('topKValueLabel').innerText = '5';
+  document.getElementById('filterSensor').value = 'Sentinel-2';
+  document.getElementById('filterStartDate').value = '';
+  document.getElementById('filterEndDate').value = '';
+  document.getElementById('filterMinQuality').value = '0.0';
+  document.getElementById('filterMaxCloud').value = '100';
+  document.getElementById('filterCountBadge').style.display = 'none';
+};
+
+window.onSearchImageSelected = function(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  attachedSearchFile = file;
+  const preview = document.getElementById('searchImageAttachmentPreview');
+  const nameLabel = document.getElementById('attachedImageName');
+  if (preview && nameLabel) {
+    nameLabel.innerText = `📷 ${file.name}`;
+    preview.style.display = 'inline-flex';
+  }
+};
+
+window.clearAttachedSearchImage = function() {
+  attachedSearchFile = null;
+  const fileInput = document.getElementById('searchImageFileInput');
+  if (fileInput) fileInput.value = '';
+  const preview = document.getElementById('searchImageAttachmentPreview');
+  if (preview) preview.style.display = 'none';
+};
+
+window.applyQuickPrompt = function(promptText) {
+  const input = document.getElementById('searchPromptInput');
+  if (input) {
+    input.value = promptText;
+    submitSemanticSearch();
+  }
+};
+
+window.submitSemanticSearch = async function() {
+  const textInput = document.getElementById('searchPromptInput');
+  const promptText = textInput ? textInput.value.trim() : '';
+
+  if (!promptText && !attachedSearchFile) {
+    alert("Please enter a search prompt or upload a reference image.");
+    return;
+  }
+
+  const chatFeed = document.getElementById('retrievalChatFeed');
+  if (!chatFeed) return;
+
+  // 1. Gather Filters
+  const topK = parseInt(document.getElementById('filterTopK')?.value || '5', 10);
+  const rawSensor = document.getElementById('filterSensor')?.value?.trim();
+  const sensor = (rawSensor && rawSensor !== "" && rawSensor !== "Any") ? rawSensor : undefined;
+  const startDate = document.getElementById('filterStartDate')?.value || undefined;
+  const endDate = document.getElementById('filterEndDate')?.value || undefined;
+  const minQuality = parseFloat(document.getElementById('filterMinQuality')?.value || '0.0');
+  const maxCloud = parseFloat(document.getElementById('filterMaxCloud')?.value || '100.0');
+
+  // 2. Render User Message in Chat
+  renderUserChatMessage(promptText, attachedSearchFile);
+
+  // Clear inputs
+  if (textInput) textInput.value = '';
+  const searchFileToUpload = attachedSearchFile;
+  clearAttachedSearchImage();
+
+  // 3. Render Assistant Loading Message
+  const loadingMsgId = `loading_${Date.now()}`;
+  renderAssistantLoadingBubble(loadingMsgId);
+  chatFeed.scrollTop = chatFeed.scrollHeight;
+
+  try {
+    let responseData = null;
+
+    if (searchFileToUpload) {
+      // Image-to-Image Query (Multipart)
+      const formData = new FormData();
+      formData.append('file', searchFileToUpload);
+      formData.append('top_k', topK.toString());
+      if (sensor) formData.append('sensor', sensor);
+      if (startDate) formData.append('start_date', startDate);
+      if (endDate) formData.append('end_date', endDate);
+      formData.append('min_quality', minQuality.toString());
+      formData.append('max_cloud_pct', maxCloud.toString());
+
+      const res = await fetch(`${API_BASE}/api/v1/search/image`, {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || `Server returned error ${res.status}`);
+      }
+      responseData = await res.json();
+
+    } else {
+      // Text Query (JSON)
+      const payload = {
+        query_text: promptText,
+        top_k: topK,
+        filters: {
+          sensor: sensor || undefined,
+          start_date: startDate ? new Date(startDate).toISOString() : undefined,
+          end_date: endDate ? new Date(endDate).toISOString() : undefined,
+          min_quality: minQuality > 0 ? minQuality : undefined,
+          max_cloud_pct: maxCloud < 100 ? maxCloud : undefined
+        }
+      };
+
+      const res = await fetch(`${API_BASE}/api/v1/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || `Server returned error ${res.status}`);
+      }
+      responseData = await res.json();
+    }
+
+    // Remove Loading Bubble
+    const loadingElem = document.getElementById(loadingMsgId);
+    if (loadingElem) loadingElem.remove();
+
+    // Render Search Results
+    renderAssistantResultsBubble(responseData);
+    chatFeed.scrollTop = chatFeed.scrollHeight;
+
+  } catch (err) {
+    const loadingElem = document.getElementById(loadingMsgId);
+    if (loadingElem) loadingElem.remove();
+    renderAssistantErrorBubble(err.message);
+    chatFeed.scrollTop = chatFeed.scrollHeight;
+  }
+};
+
+function renderUserChatMessage(text, file) {
+  const chatFeed = document.getElementById('retrievalChatFeed');
+  const msg = document.createElement('div');
+  msg.className = 'chat-message user';
+
+  let contentHtml = '';
+  if (file) {
+    const previewUrl = URL.createObjectURL(file);
+    contentHtml += `<div style="margin-bottom: 6px;"><img src="${previewUrl}" style="max-height: 120px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);" alt="Uploaded Query"></div>`;
+  }
+  if (text) {
+    contentHtml += `<div class="chat-text" style="font-weight: 500;">${escapeHtml(text)}</div>`;
+  }
+
+  msg.innerHTML = `
+    <div class="chat-avatar">👤</div>
+    <div class="chat-bubble">
+      ${contentHtml}
+    </div>
+  `;
+  chatFeed.appendChild(msg);
+}
+
+function renderAssistantLoadingBubble(id) {
+  const chatFeed = document.getElementById('retrievalChatFeed');
+  const msg = document.createElement('div');
+  msg.className = 'chat-message assistant';
+  msg.id = id;
+  msg.innerHTML = `
+    <div class="chat-avatar">🛰️</div>
+    <div class="chat-bubble">
+      <div style="display: flex; align-items: center; gap: 10px; color: var(--accent-cyan); font-size: 13px;">
+        <span class="status-dot"></span>
+        <span>Computing RemoteCLIP 512-dim embedding & searching Qdrant archive...</span>
+      </div>
+    </div>
+  `;
+  chatFeed.appendChild(msg);
+}
+
+function renderAssistantErrorBubble(errMsg) {
+  const chatFeed = document.getElementById('retrievalChatFeed');
+  const msg = document.createElement('div');
+  msg.className = 'chat-message assistant';
+  msg.innerHTML = `
+    <div class="chat-avatar">⚠️</div>
+    <div class="chat-bubble" style="border-color: rgba(244, 63, 94, 0.4); background: rgba(244, 63, 94, 0.1);">
+      <div style="color: var(--accent-rose); font-weight: 600; font-size: 13px; margin-bottom: 4px;">Search Failed</div>
+      <div style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(errMsg)}</div>
+    </div>
+  `;
+  chatFeed.appendChild(msg);
+}
+
+function renderAssistantResultsBubble(response) {
+  const chatFeed = document.getElementById('retrievalChatFeed');
+  const msg = document.createElement('div');
+  msg.className = 'chat-message assistant';
+
+  currentSearchResults = response.results || [];
+
+  let headerHtml = `
+    <div class="chat-bubble-header">
+      <span class="assistant-name">Search Results (${response.total_found} Matches)</span>
+      <span class="assistant-meta">⚡ ${response.execution_time_ms} ms &bull; Cosine Similarity</span>
+    </div>
+  `;
+
+  if (response.total_found === 0) {
+    msg.innerHTML = `
+      <div class="chat-avatar">🛰️</div>
+      <div class="chat-bubble">
+        ${headerHtml}
+        <div class="chat-text" style="color: var(--text-secondary);">
+          No matching tiles found for this query within the selected filter constraints. Try broadening your date range or adjusting quality filters.
+        </div>
+      </div>
+    `;
+    chatFeed.appendChild(msg);
+    return;
+  }
+
+  // Build Results Grid
+  let gridHtml = `<div class="retrieval-results-grid">`;
+  response.results.forEach((item, idx) => {
+    const scorePct = (item.score * 100).toFixed(1);
+    const thumbUrl = getTileThumbnailUrl(item);
+    const dateStr = item.acquisition_date ? item.acquisition_date.split('T')[0] : 'Unknown Date';
+
+    const ndviVal = item.mean_ndvi !== null && item.mean_ndvi !== undefined ? item.mean_ndvi.toFixed(2) : '-';
+    const ndwiVal = item.mean_ndwi !== null && item.mean_ndwi !== undefined ? item.mean_ndwi.toFixed(2) : '-';
+    const ndbiVal = item.mean_ndbi !== null && item.mean_ndbi !== undefined ? item.mean_ndbi.toFixed(2) : '-';
+
+    gridHtml += `
+      <div class="result-card">
+        <div class="result-thumb-wrap">
+          <img class="result-thumb-img" src="${thumbUrl}" alt="${item.tile_id}" onerror="handleTileThumbError(this, '${item.tile_id}')">
+          <div class="result-score-badge">${scorePct}% Match</div>
+        </div>
+        <div class="result-body">
+          <div class="result-title-row">
+            <span class="result-tile-id">#${idx + 1} &bull; ${item.tile_id}</span>
+            <span class="result-date">📅 ${dateStr}</span>
+          </div>
+
+          <!-- Spot Description (Phase 2.4) -->
+          <div class="result-spot-desc">
+            ${escapeHtml(item.spot_description || 'Analysis complete.')}
+          </div>
+
+          <!-- Spectral Index Mini-Pills -->
+          <div class="result-spectral-chips">
+            <span class="spec-chip ndvi">NDVI ${ndviVal}</span>
+            <span class="spec-chip ndwi">NDWI ${ndwiVal}</span>
+            <span class="spec-chip ndbi">NDBI ${ndbiVal}</span>
+          </div>
+
+          <!-- Actions -->
+          <div class="result-card-actions">
+            <button class="result-action-btn" onclick="openTileInspect('${item.tile_id}')">
+              🔍 Inspect
+            </button>
+            <button class="result-action-btn" onclick="openTileInMap('${item.tile_id}', ${item.centroid_lat || 'null'}, ${item.centroid_lon || 'null'}, ${JSON.stringify(item.geometry_geojson || null).replace(/"/g, '&quot;')})">
+              🗺️ Open in Map
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  gridHtml += `</div>`;
+
+  msg.innerHTML = `
+    <div class="chat-avatar">🛰️</div>
+    <div class="chat-bubble" style="width: 100%;">
+      ${headerHtml}
+      ${gridHtml}
+    </div>
+  `;
+  chatFeed.appendChild(msg);
+}
+
+// Fallback image generator for missing/mock tile previews
+window.getTileThumbnailUrl = function(item) {
+  if (item.thumbnail_url && !item.thumbnail_url.includes('/null/')) {
+    return item.thumbnail_url.startsWith('http') ? item.thumbnail_url : `${API_BASE}${item.thumbnail_url}`;
+  }
+  if (item.site_key && item.site_key !== 'null') {
+    return `${API_BASE}/data/tiles/${item.site_key}/${item.tile_id}_preview.jpg`;
+  }
+  return createTileSvgDataUri(item.tile_id);
+};
+
+window.handleTileThumbError = function(img, tileId) {
+  img.onerror = null;
+  img.src = createTileSvgDataUri(tileId);
+};
+
+function createTileSvgDataUri(tileId) {
+  const cleanId = escapeHtml(tileId || 'Sentinel-2 Tile');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+    <rect width="512" height="512" fill="#0d1424"/>
+    <defs>
+      <radialGradient id="grad" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#1e293b"/>
+        <stop offset="100%" stop-color="#070a12"/>
+      </radialGradient>
+      <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+        <path d="M 32 0 L 0 0 0 32" fill="none" stroke="rgba(6,182,212,0.12)" stroke-width="1"/>
+      </pattern>
+    </defs>
+    <rect width="512" height="512" fill="url(#grad)"/>
+    <rect width="512" height="512" fill="url(#grid)"/>
+    <circle cx="256" cy="256" r="140" fill="none" stroke="rgba(6,182,212,0.25)" stroke-width="2" stroke-dasharray="6,6"/>
+    <line x1="256" y1="80" x2="256" y2="432" stroke="rgba(6,182,212,0.3)" stroke-width="1.5"/>
+    <line x1="80" y1="256" x2="432" y2="256" stroke="rgba(6,182,212,0.3)" stroke-width="1.5"/>
+    <text x="256" y="240" font-family="monospace" font-size="28" fill="#38bdf8" text-anchor="middle" font-weight="bold">🛰️ SENTINEL-2</text>
+    <text x="256" y="275" font-family="monospace" font-size="14" fill="#94a3b8" text-anchor="middle">512x512 MULTI-SPECTRAL</text>
+    <text x="256" y="300" font-family="monospace" font-size="12" fill="#06b6d4" text-anchor="middle">${cleanId}</text>
+  </svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
+// ============================================================
+// 9. TILE INSPECTION MODAL & MAP HANDOFF
+// ============================================================
+
+window.openTileInspect = function(tileId) {
+  const item = currentSearchResults.find(t => t.tile_id === tileId);
+  if (!item) return;
+
+  currentInspectingTile = item;
+  const modal = document.getElementById('tileInspectModal');
+  if (!modal) return;
+
+  // Set Title & Subtitle
+  document.getElementById('inspectTileTitle').innerText = `Tile: ${item.tile_id}`;
+  document.getElementById('inspectTileSubtitle').innerText = `${item.sensor || 'Sentinel-2'} &bull; Scene: ${item.scene_id || 'N/A'}`;
+
+  // Image & Score
+  const thumbUrl = getTileThumbnailUrl(item);
+  document.getElementById('inspectTileImage').src = thumbUrl;
+  document.getElementById('inspectScoreBadge').innerText = `${(item.score * 100).toFixed(1)}% Match`;
+
+  // Description
+  document.getElementById('inspectDescriptionBox').innerText = item.spot_description || "Detailed spectral indices calculated.";
+
+  // Download GeoTIFF link
+  const tifBtn = document.getElementById('inspectDownloadTifBtn');
+  if (tifBtn) {
+    tifBtn.href = `${API_BASE}/data/tiles/${item.site_key || 'default'}/${item.tile_id}.tif`;
+  }
+
+  // Spectral Meters
+  const ndvi = item.mean_ndvi !== null && item.mean_ndvi !== undefined ? item.mean_ndvi : 0;
+  const ndwi = item.mean_ndwi !== null && item.mean_ndwi !== undefined ? item.mean_ndwi : 0;
+  const ndbi = item.mean_ndbi !== null && item.mean_ndbi !== undefined ? item.mean_ndbi : 0;
+
+  document.getElementById('inspectValNdvi').innerText = item.mean_ndvi !== null && item.mean_ndvi !== undefined ? ndvi.toFixed(3) : 'N/A';
+  document.getElementById('inspectValNdwi').innerText = item.mean_ndwi !== null && item.mean_ndwi !== undefined ? ndwi.toFixed(3) : 'N/A';
+  document.getElementById('inspectValNdbi').innerText = item.mean_ndbi !== null && item.mean_ndbi !== undefined ? ndbi.toFixed(3) : 'N/A';
+
+  // Scale -1 to +1 into 0% to 100%
+  document.getElementById('inspectBarNdvi').style.width = `${Math.min(100, Math.max(0, ((ndvi + 1) / 2) * 100))}%`;
+  document.getElementById('inspectBarNdwi').style.width = `${Math.min(100, Math.max(0, ((ndwi + 1) / 2) * 100))}%`;
+  document.getElementById('inspectBarNdbi').style.width = `${Math.min(100, Math.max(0, ((ndbi + 1) / 2) * 100))}%`;
+
+  // Metadata Table
+  document.getElementById('inspectMetaTileId').innerText = item.tile_id;
+  document.getElementById('inspectMetaSceneId').innerText = item.scene_id || 'N/A';
+  document.getElementById('inspectMetaDate').innerText = item.acquisition_date || 'N/A';
+  document.getElementById('inspectMetaCoords').innerText = (item.centroid_lat && item.centroid_lon) 
+    ? `${item.centroid_lat.toFixed(4)}° N, ${item.centroid_lon.toFixed(4)}° E` 
+    : 'N/A';
+  document.getElementById('inspectMetaCloud').innerText = `${item.cloud_pct !== null && item.cloud_pct !== undefined ? item.cloud_pct.toFixed(1) : '0.0'}%`;
+  document.getElementById('inspectMetaQuality').innerText = `${item.quality_confidence !== null && item.quality_confidence !== undefined ? item.quality_confidence.toFixed(2) : '1.00'} (Gated)`;
+
+  modal.style.display = 'flex';
+};
+
+window.closeTileInspect = function() {
+  const modal = document.getElementById('tileInspectModal');
+  if (modal) modal.style.display = 'none';
+  currentInspectingTile = null;
+};
+
+window.inspectOpenInMapClicked = function() {
+  if (!currentInspectingTile) return;
+  const item = currentInspectingTile;
+  closeTileInspect();
+  openTileInMap(item.tile_id, item.centroid_lat, item.centroid_lon, item.geometry_geojson);
+};
+
+window.openTileInMap = function(tileId, centroidLat, centroidLon, geometryGeoJson) {
+  // If not on map page, navigate to map page with query params
+  if (!document.getElementById('leafletMap')) {
+    const params = new URLSearchParams();
+    params.set('tile_id', tileId);
+    if (centroidLat) params.set('lat', centroidLat);
+    if (centroidLon) params.set('lon', centroidLon);
+    window.location.href = `/?${params.toString()}`;
+    return;
+  }
+
+  // If on map page with view switching:
+  if (typeof switchPage === 'function') {
+    switchPage('map');
+  }
+
+  if (!map) return;
+
+  // Remove previous highlight
+  if (mapTileHighlightLayer) {
+    map.removeLayer(mapTileHighlightLayer);
+    mapTileHighlightLayer = null;
+  }
+
+  // Draw highlighted tile polygon
+  if (geometryGeoJson && geometryGeoJson.coordinates) {
+    mapTileHighlightLayer = L.geoJSON(geometryGeoJson, {
+      style: {
+        color: '#f59e0b',
+        weight: 3,
+        opacity: 1,
+        fillColor: '#f59e0b',
+        fillOpacity: 0.35,
+        dashArray: '6, 6'
+      }
+    }).addTo(map);
+
+    mapTileHighlightLayer.bindPopup(`
+      <div class="popup-title">🎯 Retrieved Tile: ${tileId}</div>
+      <div class="popup-stat">Centroid: ${centroidLat ? centroidLat.toFixed(4) : ''}° N, ${centroidLon ? centroidLon.toFixed(4) : ''}° E</div>
+    `).openPopup();
+
+    map.fitBounds(mapTileHighlightLayer.getBounds(), { maxZoom: 15, padding: [50, 50] });
+  } else if (centroidLat && centroidLon) {
+    map.setView([centroidLat, centroidLon], 14);
+    mapTileHighlightLayer = L.circleMarker([centroidLat, centroidLon], {
+      radius: 10,
+      color: '#f59e0b',
+      fillColor: '#f59e0b',
+      fillOpacity: 0.8
+    }).addTo(map);
+    mapTileHighlightLayer.bindPopup(`<b>Retrieved Tile:</b> ${tileId}`).openPopup();
+  }
+};
+
+function checkUrlParamsForTileHighlight() {
+  const params = new URLSearchParams(window.location.search);
+  const tileId = params.get('tile_id');
+  const lat = parseFloat(params.get('lat'));
+  const lon = parseFloat(params.get('lon'));
+
+  if (tileId && lat && lon && map) {
+    setTimeout(() => {
+      openTileInMap(tileId, lat, lon, null);
+    }, 500);
+  }
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+// ============================================================
+// 10. INITIALIZE ON DOM LOAD
 // ============================================================
 
 document.addEventListener('DOMContentLoaded', () => {
-  initMap();
+  if (document.getElementById('leafletMap')) {
+    initMap();
+    checkUrlParamsForTileHighlight();
+  }
 });
+

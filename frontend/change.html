@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AeroLens — Multi-Temporal Change Detection Studio</title>
+  <link rel="stylesheet" href="/frontend/index.css">
+  <style>
+    .nav-item.active {
+      background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(99, 102, 241, 0.25));
+      border-color: var(--border-active);
+      color: #38bdf8;
+    }
+  </style>
+</head>
+<body>
+  <!-- Top Aerospace Navigation Bar -->
+  <header>
+    <div class="logo-section">
+      <div class="logo-badge">🛰️</div>
+      <div>
+        <div class="logo-title">AEROLENS &bull; CHANGE DETECTION STUDIO</div>
+        <div class="logo-subtitle">BI-TEMPORAL DIFFERENCE INDEXING &bull; DEFENSE DGIS</div>
+      </div>
+    </div>
+    <nav class="nav-links">
+      <a href="/" class="nav-item" id="nav-map" style="text-decoration: none;"><span>🗺️</span> Map & Coverage</a>
+      <a href="/retrieval.html" class="nav-item" id="nav-retrieval" style="text-decoration: none;"><span>🔍</span> Semantic Retrieval</a>
+      <a href="/change.html" class="nav-item active" id="nav-change" style="text-decoration: none;"><span>🔄</span> Change Detection</a>
+      <a href="/clustering.html" class="nav-item" id="nav-clustering" style="text-decoration: none;"><span>📊</span> Clustering</a>
+      <a href="/review.html" class="nav-item" id="nav-review" style="text-decoration: none;"><span>📝</span> Review Tool</a>
+    </nav>
+    <div class="header-status">
+      <a href="/" class="ingest-aoi-nav-btn" style="text-decoration: none;"><span>🗺️</span> Open Map Explorer</a>
+      <span class="tag-badge">Phase 3: Next Up</span>
+    </div>
+  </header>
+
+  <div class="content-container">
+    <div class="coming-soon-wrapper">
+      <div class="coming-soon-card">
+        <div class="coming-soon-icon">🔄</div>
+        <h2>Multi-Temporal Structural Change Detection</h2>
+        <p>
+          Bi-temporal and multi-year structural change analysis comparing historical ($T_1$) vs recent ($T_2$) Sentinel-2 observation canvases with automated spectral difference indexing ($\Delta\text{NDVI}$, $\Delta\text{NDBI}$, $\Delta\text{NDWI}$).
+        </p>
+        <div class="badge-cluster">
+          <span class="feature-tag">Bi-Temporal Canvas Alignment</span>
+          <span class="feature-tag">NDVI Vegetation Dynamics</span>
+          <span class="feature-tag">NDBI Urban Construction Tracking</span>
+          <span class="feature-tag">NDWI Surface Water Alterations</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

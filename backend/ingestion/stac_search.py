@@ -150,16 +150,24 @@ def _search_single_bucket(
         logger.warning(f"pystac_client not installed: {err}")
         return []
 
-    client = Client.open(stac_endpoint)
-    search = client.search(
-        collections=[collection],
-        bbox=list(bbox),
-        datetime=datetime_range,
-        query={"eo:cloud_cover": {"lt": max_cloud_cover}},
-        limit=limit,
-    )
+    try:
+        client = Client.open(stac_endpoint, timeout=3.0)
+    except Exception as c_err:
+        logger.warning(f"Could not connect to STAC endpoint {stac_endpoint}: {c_err}")
+        return []
 
-    items = list(search.items())
+    try:
+        search = client.search(
+            collections=[collection],
+            bbox=list(bbox),
+            datetime=datetime_range,
+            query={"eo:cloud_cover": {"lt": max_cloud_cover}},
+            limit=limit,
+        )
+        items = list(search.items())
+    except Exception as s_err:
+        logger.warning(f"STAC search query failed: {s_err}")
+        return []
     if not items:
         # Retry with slightly relaxed cloud cover
         search_relaxed = client.search(
