@@ -49,13 +49,14 @@ STANDARD_CANVAS_BANDS = DEFAULT_5_BANDS
 
 # Alias lookup for flexible band resolution
 BAND_ALIASES: Dict[str, List[str]] = {
-    "blue": ["blue", "b02"], "b02": ["b02", "blue"],
-    "green": ["green", "b03"], "b03": ["b03", "green"],
-    "red": ["red", "b04"], "b04": ["b04", "red"],
-    "nir": ["nir", "b08"], "b08": ["b08", "nir"],
-    "swir": ["swir", "b11"], "b11": ["b11", "swir"],
-    "b01": ["b01"], "b05": ["b05"], "b8a": ["b8a"],
-    "b09": ["b09"], "b10": ["b10"], "b12": ["b12"],
+    "blue": ["blue", "b02", "b2"], "b02": ["b02", "blue", "b2"], "b2": ["b2", "b02", "blue"],
+    "green": ["green", "b03", "b3"], "b03": ["b03", "green", "b3"], "b3": ["b3", "b03", "green"],
+    "red": ["red", "b04", "b4"], "b04": ["b04", "red", "b4"], "b4": ["b4", "b04", "red"],
+    "nir": ["nir", "b08", "b8", "b5"], "b08": ["b08", "nir", "b8"], "b8": ["b8", "b08", "nir"],
+    "swir": ["swir", "b11", "b6"], "b11": ["b11", "swir", "b6"], "b6": ["b6", "b11", "swir"],
+    "b01": ["b01", "b1", "coastal"], "b1": ["b1", "b01", "coastal"],
+    "b05": ["b05", "b5"], "b8a": ["b8a"],
+    "b09": ["b09", "b9"], "b10": ["b10"], "b12": ["b12", "b7"],
 }
 
 
@@ -71,6 +72,7 @@ class CanvasData:
     width: int
     source_type: str = "aoi_search"
     visual_rgb: Optional[np.ndarray] = None # Shape (3, H, W) pristine 10m True Color Image
+    nodata_val: Optional[float] = None
 
     def _match_band_index(self, name: str) -> Optional[int]:
         target = name.lower()
@@ -95,13 +97,39 @@ class CanvasData:
         return self.data[idx].astype(np.float32)
 
     def get_rgb(self) -> np.ndarray:
-        """Returns 3-band RGB array of shape (3, H, W)."""
+        """
+        Returns 3-band RGB array of shape (3, H, W).
+        Gracefully handles 1-band grayscale/panchromatic and non-standard bands without crashing.
+        """
         if self.visual_rgb is not None and self.visual_rgb.shape[0] >= 3:
             return self.visual_rgb.astype(np.float32)
-        red = self.get_band("red") if self.has_band("red") else self.get_band("B04")
-        green = self.get_band("green") if self.has_band("green") else self.get_band("B03")
-        blue = self.get_band("blue") if self.has_band("blue") else self.get_band("B02")
-        return np.stack([red, green, blue], axis=0)
+
+        # 1-band / Grayscale / Panchromatic handling (PS requirement: gracefully degrade, no crash)
+        if len(self.band_names) == 1 or self.data.shape[0] == 1:
+            gray = self.data[0].astype(np.float32)
+            return np.stack([gray, gray, gray], axis=0)
+
+        # Standard red/green/blue lookup
+        has_r = self.has_band("red") or self.has_band("B04") or self.has_band("b4")
+        has_g = self.has_band("green") or self.has_band("B03") or self.has_band("b3")
+        has_b = self.has_band("blue") or self.has_band("B02") or self.has_band("b2")
+
+        if has_r and has_g and has_b:
+            red = self.get_band("red") if self.has_band("red") else (self.get_band("B04") if self.has_band("B04") else self.get_band("b4"))
+            green = self.get_band("green") if self.has_band("green") else (self.get_band("B03") if self.has_band("B03") else self.get_band("b3"))
+            blue = self.get_band("blue") if self.has_band("blue") else (self.get_band("B02") if self.has_band("B02") else self.get_band("b2"))
+            return np.stack([red, green, blue], axis=0)
+
+        # Graceful fallback when standard RGB channels are not all detected
+        if self.data.shape[0] >= 3:
+            return self.data[:3].astype(np.float32)
+        elif self.data.shape[0] == 2:
+            b0 = self.data[0].astype(np.float32)
+            b1 = self.data[1].astype(np.float32)
+            return np.stack([b0, b1, b0], axis=0)
+        else:
+            gray = self.data[0].astype(np.float32)
+            return np.stack([gray, gray, gray], axis=0)
 
 
 def calculate_buffered_bbox(
@@ -347,38 +375,53 @@ def assemble_canvas_from_file(
     """
     Entry Point B Canvas Assembler:
     Reads local evaluation GeoTIFF directly, reprojecting to EPSG:4326.
+    Handles both single-file multi-band GeoTIFF and multi-file separate band rasters (e.g. Landsat folder).
     """
     min_lon, min_lat, max_lon, max_lat = file_input.bounds_wgs84
     width = max(512, int(round((max_lon - min_lon) / pixel_res_deg)))
     height = max(512, int(round((max_lat - min_lat) / pixel_res_deg)))
     target_transform = from_bounds(min_lon, min_lat, max_lon, max_lat, width, height)
 
-    with rasterio.open(str(file_input.file_path)) as src:
-        if src.crs is None:
-            raw_data = src.read()
-            if raw_data.shape[1] != height or raw_data.shape[2] != width:
-                # Resize directly
-                from PIL import Image
-                resized_bands = []
-                for b_idx in range(raw_data.shape[0]):
-                    pil_b = Image.fromarray(raw_data[b_idx])
-                    pil_b_res = pil_b.resize((width, height), Image.Resampling.BILINEAR)
-                    resized_bands.append(np.array(pil_b_res))
-                raw_data = np.stack(resized_bands, axis=0)
-        else:
+    # Check if multi-file separate bands (e.g. Landsat Collection 2 or Sentinel-2 separate bands)
+    if file_input.sub_file_paths and len(file_input.sub_file_paths) > 1:
+        band_layers: List[np.ndarray] = []
+        loaded_band_names: List[str] = []
+
+        for p, b_name in zip(file_input.sub_file_paths, file_input.band_order):
+            try:
+                with rasterio.open(str(p)) as src:
+                    with WarpedVRT(src, crs=target_crs, transform=target_transform,
+                                   width=width, height=height, resampling=Resampling.bilinear) as vrt:
+                        band_data = vrt.read(1, out_shape=(height, width), resampling=Resampling.bilinear).astype(np.float32)
+                        band_layers.append(band_data)
+                        loaded_band_names.append(b_name)
+            except Exception as e:
+                logger.warning(f"[Canvas] Error loading multi-file band '{p.name}': {e}")
+
+        if not band_layers:
+            raise ValueError(f"Failed to read any bands from multi-file input: {file_input.sub_file_paths}")
+
+        raw_data = np.stack(band_layers, axis=0)
+        final_band_names = loaded_band_names
+    else:
+        with rasterio.open(str(file_input.file_path)) as src:
+            if src.crs is None:
+                raise ValueError(f"GeoTIFF '{file_input.file_path.name}' lacks embedded CRS metadata.")
             with WarpedVRT(src, crs=target_crs, transform=target_transform,
                            width=width, height=height, resampling=Resampling.bilinear) as vrt:
                 raw_data = vrt.read(out_shape=(src.count, height, width), resampling=Resampling.bilinear)
+        final_band_names = file_input.band_order
 
     return CanvasData(
         data=raw_data.astype(np.float32),
-        band_names=file_input.band_order,
+        band_names=final_band_names,
         transform=target_transform,
         crs="EPSG:4326",
         bbox=file_input.bounds_wgs84,
         height=height,
         width=width,
-        source_type="organiser_provided"
+        source_type="organiser_provided",
+        nodata_val=file_input.nodata_value
     )
 
 

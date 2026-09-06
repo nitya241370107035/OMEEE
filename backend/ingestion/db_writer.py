@@ -49,6 +49,8 @@ def ensure_schema_migrated(conn=None):
         with conn.cursor() as cur:
             migration_sql = """
             ALTER TABLE tiles ADD COLUMN IF NOT EXISTS thumbnail_path TEXT;
+            ALTER TABLE tiles ADD COLUMN IF NOT EXISTS bad_mask_path TEXT;
+            ALTER TABLE tiles ADD COLUMN IF NOT EXISTS pixel_scale TEXT DEFAULT 'reflectance_fixed_10000';
             ALTER TABLE tiles ADD COLUMN IF NOT EXISTS band_order JSONB;
             ALTER TABLE tiles ADD COLUMN IF NOT EXISTS band_stats JSONB;
             ALTER TABLE tiles ADD COLUMN IF NOT EXISTS mean_ndvi FLOAT;
@@ -156,12 +158,14 @@ def upsert_tiles(
                 tile_id, scene_id, site_key, geometry,
                 centroid_lat, centroid_lon, acquisition_date, sensor,
                 cloud_pct, quality_confidence, file_path, thumbnail_path,
+                bad_mask_path, pixel_scale,
                 band_order, band_stats, mean_ndvi, mean_ndwi, mean_ndbi, source_type,
                 mosaicked_scenes
             ) VALUES (
                 %s, %s, %s, ST_GeomFromText(%s, 4326),
                 %s, %s, %s, %s,
                 %s, %s, %s, %s,
+                %s, %s,
                 %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (tile_id) DO UPDATE SET
@@ -175,6 +179,8 @@ def upsert_tiles(
                 quality_confidence = EXCLUDED.quality_confidence,
                 file_path = EXCLUDED.file_path,
                 thumbnail_path = EXCLUDED.thumbnail_path,
+                bad_mask_path = EXCLUDED.bad_mask_path,
+                pixel_scale = EXCLUDED.pixel_scale,
                 band_order = EXCLUDED.band_order,
                 band_stats = EXCLUDED.band_stats,
                 mean_ndvi = EXCLUDED.mean_ndvi,
@@ -188,6 +194,8 @@ def upsert_tiles(
             for t in tiles:
                 tif_path = os.path.abspath(os.path.join(base_data_dir, "tiles", region_id, date_folder, f"{t.tile_id}.tif"))
                 jpg_path = os.path.abspath(os.path.join(base_data_dir, "tiles", region_id, date_folder, f"{t.tile_id}_thumb.jpg"))
+                mask_path = getattr(t, "bad_mask_path", None) or os.path.abspath(os.path.join(base_data_dir, "tiles", region_id, date_folder, f"{t.tile_id}_mask.tif"))
+                pixel_scale = getattr(t, "pixel_scale", "reflectance_fixed_10000")
 
                 records.append((
                     t.tile_id,
@@ -202,6 +210,8 @@ def upsert_tiles(
                     t.quality_confidence,
                     tif_path,
                     jpg_path,
+                    mask_path,
+                    pixel_scale,
                     json.dumps(t.band_order),
                     json.dumps(t.band_stats),
                     t.mean_ndvi,
@@ -253,3 +263,6 @@ def update_coverage_status(
     finally:
         if should_close:
             conn.close()
+
+
+update_coverage = update_coverage_status

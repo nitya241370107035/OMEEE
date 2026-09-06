@@ -208,16 +208,24 @@ def _search_single_bucket(
     if not valid_items:
         return []
 
-    # Group by closest acquisition date / orbit pass
-    valid_items.sort(key=lambda x: x.properties.get("eo:cloud_cover", 100.0))
-    best_date = valid_items[0].datetime.date() if valid_items[0].datetime else None
+    # Group by MGRS tile code to ensure 100% full coverage across multi-granule AOIs
+    from collections import defaultdict
+    mgrs_groups = defaultdict(list)
+    for it in valid_items:
+        # Extract MGRS code from properties or item id (e.g. S2A_43REQ_...)
+        mgrs_code = it.properties.get("s2:mgrs_tile")
+        if not mgrs_code:
+            parts = it.id.split("_")
+            mgrs_code = parts[1] if len(parts) > 1 else it.id[:8]
+        mgrs_groups[mgrs_code].append(it)
 
-    # Pick all overlapping granules from the best date / same 3-day orbit pass
-    selected_items = [
-        it for it in valid_items
-        if it.datetime and abs((it.datetime.date() - best_date).days) <= 2
-    ] if best_date else valid_items[:2]
+    selected_items = []
+    for mgrs_code, group in mgrs_groups.items():
+        # Pick the lowest cloud cover scene for this granule
+        group.sort(key=lambda x: x.properties.get("eo:cloud_cover", 100.0))
+        selected_items.append(group[0])
 
+    logger.info(f"Selected {len(selected_items)} scene(s) covering distinct MGRS granules: {list(mgrs_groups.keys())}")
     return [_parse_stac_item(it, collection, time_bucket_label, bbox) for it in selected_items]
 
 

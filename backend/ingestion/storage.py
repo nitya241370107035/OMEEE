@@ -95,6 +95,41 @@ def save_tile_thumbnail(
     return str(output_path.as_posix())
 
 
+def save_tile_bad_mask(
+    tile: TileCandidate,
+    output_path: Path,
+    crs: str = "EPSG:4326"
+) -> str:
+    """
+    Saves the per-tile bad-pixel mask as a single-band uint8 GeoTIFF
+    (0 = good pixel, 1 = bad/cloud/shadow pixel), georeferenced identically
+    to the tile's main .tif so the two can be overlaid pixel-for-pixel.
+    """
+    if tile.bad_mask_data is not None:
+        mask_uint8 = tile.bad_mask_data.astype(np.uint8)
+    else:
+        mask_uint8 = np.zeros((512, 512), dtype=np.uint8)
+
+    height, width = mask_uint8.shape
+
+    with rasterio.open(
+        str(output_path),
+        "w",
+        driver="GTiff",
+        height=height,
+        width=width,
+        count=1,
+        dtype="uint8",
+        crs=CRS.from_string(crs),
+        transform=tile.transform,
+        compress="lzw"
+    ) as dst:
+        dst.write(mask_uint8, 1)
+        dst.set_band_description(1, "bad_pixel_cloud_shadow_mask")
+
+    return str(output_path.as_posix())
+
+
 def save_tiles_and_manifest(
     tiles: List[TileCandidate],
     region_id: str,
@@ -107,6 +142,10 @@ def save_tiles_and_manifest(
 ) -> Path:
     """
     Persists all tiles to disk in the structured archive hierarchy and writes manifest.json.
+    Saves:
+      1. {tile_id}.tif       — Multi-band fixed-scale reflectance GeoTIFF
+      2. {tile_id}_thumb.jpg — 8-bit RGB preview JPG
+      3. {tile_id}_mask.tif  — 1-band uint8 per-pixel cloud/shadow bad-mask GeoTIFF
     """
     date_str = format_date_dir(acquisition_date)
     out_dir = Path(base_data_dir) / "tiles" / region_id / date_str
@@ -117,11 +156,16 @@ def save_tiles_and_manifest(
     for tile in tiles:
         tif_filename = f"{tile.tile_id}.tif"
         jpg_filename = f"{tile.tile_id}_thumb.jpg"
+        mask_filename = f"{tile.tile_id}_mask.tif"
         tif_path = out_dir / tif_filename
         jpg_path = out_dir / jpg_filename
+        mask_path = out_dir / mask_filename
 
         save_tile_geotiff(tile, tif_path)
         save_tile_thumbnail(tile, jpg_path)
+        save_tile_bad_mask(tile, mask_path)
+
+        tile.bad_mask_path = str(mask_path.resolve())
 
         tile_record = {
             "tile_id": tile.tile_id,
@@ -147,11 +191,13 @@ def save_tiles_and_manifest(
             },
             "bands": {
                 "band_order": tile.band_order,
-                "band_stats": tile.band_stats
+                "band_stats": tile.band_stats,
+                "pixel_scale": getattr(tile, "pixel_scale", "reflectance_fixed_10000")
             },
             "storage": {
                 "geotiff_path": str(tif_path.resolve()),
-                "thumbnail_path": str(jpg_path.resolve())
+                "thumbnail_path": str(jpg_path.resolve()),
+                "bad_mask_path": str(mask_path.resolve())
             }
         }
         tile_records.append(tile_record)

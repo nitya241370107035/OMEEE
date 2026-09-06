@@ -33,6 +33,7 @@ if str(REPO_ROOT) not in sys.path:
 from backend.ingestion.input_validator import (
     validate_aoi_input,
     validate_direct_file_input,
+    validate_direct_multi_file_input,
     ValidatedAOIInput,
     ValidatedFileInput,
 )
@@ -277,10 +278,11 @@ def run_aoi_ingestion_pipeline(
 # ============================================================
 
 def run_direct_file_ingestion_pipeline(
-    file_path: Union[str, Path],
+    file_path: Union[str, Path, List[Union[str, Path]]],
     region_id: Optional[str] = None,
     custom_band_order: Optional[List[str]] = None,
     acquisition_date: Optional[str] = None,
+    sensor: Optional[str] = "auto",
     ground_crop_size: int = DEFAULT_GROUND_CROP_SIZE,
     overlap_pct: float = 0.10,
     base_data_dir: str = "data",
@@ -289,6 +291,7 @@ def run_direct_file_ingestion_pipeline(
     """
     Executes Entry Point B (Evaluation Ingestion — 100% Offline):
       1. Validates local GeoTIFF file metadata (CRS, bounds, bands)
+         Supports single multi-band GeoTIFF or multi-file separate bands (e.g. Landsat folder)
       2. Reads bands directly into working canvas (reprojecting to EPSG:4326)
       3. Cleans, masks clouds/shadows, normalizes dynamic range
       4. Slices 512x512 tiles & computes NDVI, NDWI, NDBI
@@ -297,18 +300,50 @@ def run_direct_file_ingestion_pipeline(
     """
     t0 = time.time()
     logger.info("=" * 75)
-    logger.info(f"STARTING ENTRY POINT B (OFFLINE FILE INGESTION): file='{file_path}'")
+    logger.info(f"STARTING ENTRY POINT B (OFFLINE FILE INGESTION): file='{file_path}', sensor='{sensor}'")
     logger.info("=" * 75)
 
     # Phase 1.0: Validate File Metadata
-    file_input: ValidatedFileInput = validate_direct_file_input(
-        file_path=file_path,
-        region_id=region_id,
-        custom_band_order=custom_band_order,
-        acquisition_date=acquisition_date
-    )
+    if isinstance(file_path, (list, tuple)):
+        file_input: ValidatedFileInput = validate_direct_multi_file_input(
+            file_paths=file_path,
+            region_id=region_id,
+            custom_band_order=custom_band_order,
+            acquisition_date=acquisition_date,
+            sensor=sensor
+        )
+    else:
+        p = Path(file_path)
+        if p.is_dir():
+            tif_files = sorted(list(p.glob("*.tif")) + list(p.glob("*.TIF")) + list(p.glob("*.jp2")))
+            if len(tif_files) > 1:
+                file_input = validate_direct_multi_file_input(
+                    file_paths=tif_files,
+                    region_id=region_id,
+                    custom_band_order=custom_band_order,
+                    acquisition_date=acquisition_date,
+                    sensor=sensor
+                )
+            elif len(tif_files) == 1:
+                file_input = validate_direct_file_input(
+                    file_path=tif_files[0],
+                    region_id=region_id,
+                    custom_band_order=custom_band_order,
+                    acquisition_date=acquisition_date,
+                    sensor=sensor
+                )
+            else:
+                raise FileNotFoundError(f"No GeoTIFF or JP2 files found in directory: {p}")
+        else:
+            file_input = validate_direct_file_input(
+                file_path=file_path,
+                region_id=region_id,
+                custom_band_order=custom_band_order,
+                acquisition_date=acquisition_date,
+                sensor=sensor
+            )
 
-    scene_id = file_input.file_path.stem
+    scene_id = file_input.region_id or file_input.file_path.stem
     acq_date_str = (
         file_input.acquisition_date.isoformat()
         if file_input.acquisition_date

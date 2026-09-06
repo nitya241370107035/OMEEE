@@ -40,8 +40,8 @@ class TileCandidate:
     tile_id: str
     scene_id: str
     site_key: str
-    multiband_data: np.ndarray       # Shape: (Bands, 512, 512), float32 (Raw bit depth)
-    rgb_data: np.ndarray             # Shape: (3, 512, 512), uint8 (Normalized RGB)
+    multiband_data: np.ndarray       # Shape: (Bands, 512, 512), float32 (fixed-scale reflectance [0.0, 1.5])
+    rgb_data: np.ndarray             # Shape: (3, 512, 512), uint8 (Normalized RGB for visual preview)
     band_order: List[str]            # e.g. ['blue', 'green', 'red', 'nir', 'swir']
     band_stats: Dict[str, Dict[str, float]]  # per-band min, max, mean
     transform: Affine                # Affine geotransform in EPSG:4326
@@ -55,6 +55,22 @@ class TileCandidate:
     mean_ndbi: Optional[float]       # (SWIR - NIR) / (SWIR + NIR)
     footprint_geom: Polygon          # Shapely polygon footprint in EPSG:4326
     source_type: str = "aoi_search"
+    bad_mask_data: Optional[np.ndarray] = None  # Shape: (512, 512), bool (0=good, 1=bad/cloud/shadow)
+    bad_mask_path: Optional[str] = None         # GeoTIFF mask path on disk
+    pixel_scale: str = "reflectance_fixed_10000"
+
+
+FIXED_REFLECTANCE_SCALE = 10000.0  # Sentinel-2 L2A / Landsat standard scaling factor
+
+
+def to_fixed_reflectance(raw_band_stack: np.ndarray) -> np.ndarray:
+    """
+    Converts raw DN values to reflectance [0.0, 1.5] using a FIXED,
+    non-adaptive divisor — the same divisor for every tile, every date.
+    This is what makes pixel values genuinely comparable across time,
+    unlike the per-tile-adaptive percentile stretch used for thumbnails.
+    """
+    return np.clip(raw_band_stack.astype(np.float32) / FIXED_REFLECTANCE_SCALE, 0.0, 1.5)
 
 
 def generate_site_key(lat: float, lon: float, precision: int = 4) -> str:
@@ -72,22 +88,39 @@ def generate_site_key(lat: float, lon: float, precision: int = 4) -> str:
 def compute_spectral_indices(
     tile_multiband: np.ndarray,
     band_order: List[str],
-    bad_mask: np.ndarray
-) -> Tuple[Optional[float], Optional[float], Optional[float], Dict[str, Dict[str, float]]]:
+    bad_mask: np.ndarray,
+    nodata_val: Optional[float] = None
+) -> Tuple[Optional[float], Optional[float], Optional[float], Dict[str, Any]]:
     """
-    Computes scalar mean NDVI, NDWI, NDBI and per-band statistics for a tile.
-    Excludes bad/cloud pixels when computing means to avoid skewing indices.
+    Computes vegetation (NDVI), water (NDWI), and built-up (NDBI) indices.
+    Excludes cloud/shadow bad pixels and NoData sentinels (-9999, NaN, < -9000).
     """
     band_map = {name.lower(): tile_multiband[i].astype(np.float32) for i, name in enumerate(band_order)}
-    valid_mask = ~bad_mask
+    
+    # Strictly exclude bad mask, -9999, NaN, Inf, and out-of-range negative sentinels from index math
+    is_invalid_pixel = (
+        bad_mask |
+        np.any(tile_multiband == -9999, axis=0) |
+        np.any(tile_multiband < -9000, axis=0) |
+        np.any(np.isnan(tile_multiband), axis=0) |
+        np.any(np.isinf(tile_multiband), axis=0) |
+        np.all(tile_multiband == 0, axis=0)
+    )
+    if nodata_val is not None:
+        is_invalid_pixel |= np.any(tile_multiband == nodata_val, axis=0)
+        
+    valid_mask = ~is_invalid_pixel
     if not np.any(valid_mask):
-        valid_mask = np.ones_like(bad_mask, dtype=bool)
+        # Fallback to non-nan pixels if completely masked
+        valid_mask = ~np.any(np.isnan(tile_multiband) | (tile_multiband < -9000), axis=0)
+        if not np.any(valid_mask):
+            valid_mask = np.ones_like(bad_mask, dtype=bool)
 
-    red = band_map.get("b04", band_map.get("red", band_map.get("band_1", tile_multiband[0].astype(np.float32) if tile_multiband.shape[0] >= 3 else None)))
-    green = band_map.get("b03", band_map.get("green", band_map.get("band_2", tile_multiband[1].astype(np.float32) if tile_multiband.shape[0] >= 3 else None)))
-    blue = band_map.get("b02", band_map.get("blue", band_map.get("band_3", tile_multiband[2].astype(np.float32) if tile_multiband.shape[0] >= 3 else None)))
-    nir = band_map.get("b08", band_map.get("nir", band_map.get("band_4", tile_multiband[3].astype(np.float32) if tile_multiband.shape[0] >= 4 else None)))
-    swir = band_map.get("b11", band_map.get("swir", band_map.get("b12", band_map.get("band_5", tile_multiband[4].astype(np.float32) if tile_multiband.shape[0] >= 5 else None))))
+    red = band_map.get("red", band_map.get("b04", band_map.get("b4", tile_multiband[0].astype(np.float32) if tile_multiband.shape[0] >= 3 else None)))
+    green = band_map.get("green", band_map.get("b03", band_map.get("b3", tile_multiband[1].astype(np.float32) if tile_multiband.shape[0] >= 3 else None)))
+    blue = band_map.get("blue", band_map.get("b02", band_map.get("b2", tile_multiband[2].astype(np.float32) if tile_multiband.shape[0] >= 3 else None)))
+    nir = band_map.get("nir", band_map.get("b08", band_map.get("b8", tile_multiband[3].astype(np.float32) if tile_multiband.shape[0] >= 4 else None)))
+    swir = band_map.get("swir", band_map.get("b11", band_map.get("b6", band_map.get("b12", tile_multiband[4].astype(np.float32) if tile_multiband.shape[0] >= 5 else None))))
 
     mean_ndvi: Optional[float] = None
     mean_ndwi: Optional[float] = None
@@ -98,31 +131,40 @@ def compute_spectral_indices(
         denom = nir + red
         denom[denom == 0] = 1e-6
         ndvi_arr = (nir - red) / denom
-        mean_ndvi = float(np.clip(np.mean(ndvi_arr[valid_mask]), -1.0, 1.0))
+        v_ndvi = ndvi_arr[valid_mask]
+        if len(v_ndvi) > 0:
+            mean_ndvi = float(np.clip(np.mean(v_ndvi), -1.0, 1.0))
 
     # NDWI = (Green - NIR) / (Green + NIR)
     if green is not None and nir is not None:
         denom = green + nir
         denom[denom == 0] = 1e-6
         ndwi_arr = (green - nir) / denom
-        mean_ndwi = float(np.clip(np.mean(ndwi_arr[valid_mask]), -1.0, 1.0))
+        v_ndwi = ndwi_arr[valid_mask]
+        if len(v_ndwi) > 0:
+            mean_ndwi = float(np.clip(np.mean(v_ndwi), -1.0, 1.0))
 
     # NDBI = (SWIR - NIR) / (SWIR + NIR)
     if swir is not None and nir is not None:
         denom = swir + nir
         denom[denom == 0] = 1e-6
         ndbi_arr = (swir - nir) / denom
-        mean_ndbi = float(np.clip(np.mean(ndbi_arr[valid_mask]), -1.0, 1.0))
+        v_ndbi = ndbi_arr[valid_mask]
+        if len(v_ndbi) > 0:
+            mean_ndbi = float(np.clip(np.mean(v_ndbi), -1.0, 1.0))
 
     # Per-band summary statistics
     band_stats = {}
     for name, arr in band_map.items():
-        v_pixels = arr[valid_mask]
-        band_stats[name] = {
-            "min": round(float(np.min(v_pixels)), 2),
-            "max": round(float(np.max(v_pixels)), 2),
-            "mean": round(float(np.mean(v_pixels)), 2)
-        }
+        v_pixels = arr[valid_mask & (~np.isnan(arr)) & (arr > -9000)]
+        if len(v_pixels) > 0:
+            band_stats[name] = {
+                "min": round(float(np.min(v_pixels)), 2),
+                "max": round(float(np.max(v_pixels)), 2),
+                "mean": round(float(np.mean(v_pixels)), 2)
+            }
+        else:
+            band_stats[name] = {"min": 0.0, "max": 0.0, "mean": 0.0}
 
     return mean_ndvi, mean_ndwi, mean_ndbi, band_stats
 
@@ -198,9 +240,21 @@ def slice_and_filter_tiles(
             tile_multiband = raw_multiband[:, y:y + eff_crop_size, x:x + eff_crop_size]
             tile_rgb = rgb[:, y:y + eff_crop_size, x:x + eff_crop_size]
 
-            # Discard completely empty / nodata tiles located outside the satellite swath
-            if np.all(tile_multiband == 0) or float(np.mean(tile_multiband)) < 1e-3:
-                logger.debug(f"[Tiler] Discarding tile at grid ({x}, {y}) site_key={site_key}: nodata / black array.")
+            # Discard completely empty / nodata tiles located outside the satellite swath or nodata borders
+            # Checks for zeros, -9999, NaN, Inf, and custom nodata values
+            is_nodata_pixel = (
+                (tile_multiband == 0) |
+                (tile_multiband == -9999) |
+                (tile_multiband < -9000) |
+                np.isnan(tile_multiband) |
+                np.isinf(tile_multiband)
+            )
+            if canvas_data.nodata_val is not None:
+                is_nodata_pixel |= (tile_multiband == canvas_data.nodata_val)
+
+            valid_pixels_pct = float(np.count_nonzero(~is_nodata_pixel)) / float(tile_multiband.size)
+            if valid_pixels_pct < 0.01:
+                logger.debug(f"[Tiler] Discarding tile at grid ({x}, {y}) site_key={site_key}: nodata / empty array ({valid_pixels_pct*100:.1f}% valid).")
                 continue
 
             # Resize to target 512x512 if effective crop size differs from target size
@@ -229,10 +283,13 @@ def slice_and_filter_tiles(
 
             tile_transform = from_bounds(min_lon, min_lat, max_lon, max_lat, target_size, target_size)
 
-            # Compute spectral indices
+            # Compute spectral indices on raw DN values
             mean_ndvi, mean_ndwi, mean_ndbi, band_stats = compute_spectral_indices(
-                final_multiband, band_order, final_bad_mask
+                final_multiband, band_order, final_bad_mask, nodata_val=canvas_data.nodata_val
             )
+
+            # Convert multi-band raster data to fixed-scale reflectance for physical cross-date comparability
+            fixed_reflectance_multiband = to_fixed_reflectance(final_multiband)
 
             clean_scene_id = scene_id.replace(":", "_").replace("/", "_")
             tile_id = f"{clean_scene_id}_tile_{tile_index:05d}"
@@ -243,7 +300,7 @@ def slice_and_filter_tiles(
                     tile_id=tile_id,
                     scene_id=scene_id,
                     site_key=site_key,
-                    multiband_data=final_multiband,
+                    multiband_data=fixed_reflectance_multiband,
                     rgb_data=final_rgb,
                     band_order=band_order,
                     band_stats=band_stats,
@@ -257,7 +314,9 @@ def slice_and_filter_tiles(
                     mean_ndwi=mean_ndwi,
                     mean_ndbi=mean_ndbi,
                     footprint_geom=tile_poly,
-                    source_type=source_type
+                    source_type=source_type,
+                    bad_mask_data=final_bad_mask,
+                    pixel_scale="reflectance_fixed_10000"
                 )
             )
 
