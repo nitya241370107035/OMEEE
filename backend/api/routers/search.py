@@ -56,6 +56,7 @@ async def search_semantic_image(
     end_date: Optional[str] = Form(None, description="Optional ISO end date (e.g. 2024-01-01)"),
     min_quality: float = Form(0.0, description="Minimum quality gate score (0.0 - 1.0)"),
     max_cloud_pct: float = Form(100.0, description="Maximum cloud coverage percentage"),
+    min_similarity: float = Form(0.65, description="Minimum similarity percentage cutoff (0.0 to 1.0, e.g. 0.65 for 65%)"),
     aoi_geojson: Optional[str] = Form(None, description="Optional GeoJSON Polygon string for spatial filtering"),
     analyst_id: str = Form("demo_analyst", description="Analyst identity for audit logging")
 ):
@@ -91,7 +92,8 @@ async def search_semantic_image(
             query_image_bytes=contents,
             filters=search_filters,
             top_k=top_k,
-            analyst_id=analyst_id
+            analyst_id=analyst_id,
+            min_similarity=min_similarity
         )
 
         service = get_vector_search_service()

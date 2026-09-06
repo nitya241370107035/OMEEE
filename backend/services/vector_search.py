@@ -65,13 +65,17 @@ PG_DSN = f"host={PG_HOST} port={PG_PORT} dbname={PG_DB} user={PG_USER} password=
 def generate_tile_description(
     mean_ndvi: Optional[float] = None,
     mean_ndwi: Optional[float] = None,
-    mean_ndbi: Optional[float] = None
+    mean_ndbi: Optional[float] = None,
+    sensor: Optional[str] = None
 ) -> str:
     """
     Phase 2.4 & 2.7: Comprehensive rule-based terrain and tactical spot explanation.
-    Evaluates compound multi-spectral index pairs (NDVI, NDWI, NDBI) to produce
-    an intelligence-grade landscape assessment and quantitative metric breakdown.
+    Evaluates compound multi-spectral index pairs (NDVI, NDWI, NDBI) or high-res optical signatures.
     """
+    if sensor and "maxar" in sensor.lower():
+        vari_clause = f" (VARI visible vegetation index: {mean_ndvi:.2f})" if mean_ndvi is not None else ""
+        return f"High-resolution sub-meter reconnaissance imagery (True Color optical). Optimized for detailed tactical object, vehicle, and infrastructure identification{vari_clause}."
+
     if mean_ndvi is None and mean_ndwi is None and mean_ndbi is None:
         return "Spectral indices unavailable for this ground tile."
 
@@ -174,6 +178,7 @@ class SearchRequest(BaseModel):
     filters: Optional[SearchFilter] = Field(default_factory=SearchFilter)
     top_k: int = Field(5, ge=1, le=100, description="Number of top ranked results to retrieve")
     analyst_id: str = Field("demo_analyst", description="Analyst identity for audit logging")
+    min_similarity: Optional[float] = Field(None, description="Minimum similarity threshold (0.0 to 1.0, e.g. 0.65 for 65%)")
 
 
 class SearchResultItem(BaseModel):
@@ -295,7 +300,18 @@ class VectorSearchService:
                     conditions.append(
                         FieldCondition(
                             key="sensor",
-                            match=MatchAny(any=["sentinel-2", "sentinel-2a", "sentinel-2b", "Sentinel-2", "Sentinel-2A", "Sentinel-2B", "Sentinel-2 L2A"])
+                            match=MatchAny(any=[
+                                "sentinel-2", "sentinel-2a", "sentinel-2b", "sentinel-2c", "sentinel-2d",
+                                "Sentinel-2", "Sentinel-2A", "Sentinel-2B", "Sentinel-2C", "Sentinel-2D",
+                                "Sentinel-2 L2A", "sentinel2", "sentinel"
+                            ])
+                        )
+                    )
+                elif "maxar" in s_val:
+                    conditions.append(
+                        FieldCondition(
+                            key="sensor",
+                            match=MatchAny(any=["Maxar", "maxar", "Maxar WorldView", "Maxar WorldView / Wayback"])
                         )
                     )
                 else:
@@ -355,34 +371,55 @@ class VectorSearchService:
 
         q_filter = self.build_qdrant_filter(filters, candidate_tile_ids=candidate_tile_ids)
 
-        fetch_limit = max(top_k * 4, 25)
-        try:
-            if hasattr(self.qdrant, "query_points"):
-                query_response = self.qdrant.query_points(
-                    collection_name=COLLECTION_NAME,
-                    query=query_vector,
-                    query_filter=q_filter,
-                    limit=fetch_limit,
-                    with_payload=True
-                )
-                points = query_response.points
+        # Dynamic Qdrant collection routing (Maxar vs Sentinel-2 vs Global)
+        maxar_coll = os.getenv("QDRANT_MAXAR_COLLECTION", "maxar_tile_embeddings")
+        collections_to_search = []
+        if filters and filters.sensor:
+            s_low = filters.sensor.lower()
+            if "maxar" in s_low:
+                collections_to_search = [maxar_coll]
+            elif "sentinel" in s_low or "s2" in s_low:
+                collections_to_search = [COLLECTION_NAME]
             else:
-                points = self.qdrant.search(
-                    collection_name=COLLECTION_NAME,
-                    query_vector=query_vector,
-                    query_filter=q_filter,
-                    limit=fetch_limit,
-                    with_payload=True
-                )
-        except Exception as e:
-            log.error(f"Error executing Qdrant vector search: {e}", exc_info=True)
-            return []
+                collections_to_search = [COLLECTION_NAME, maxar_coll]
+        else:
+            collections_to_search = [COLLECTION_NAME, maxar_coll]
+
+        fetch_limit = max(top_k * 4, 25)
+        all_points = []
+        for coll in collections_to_search:
+            try:
+                if hasattr(self.qdrant, "query_points"):
+                    query_response = self.qdrant.query_points(
+                        collection_name=coll,
+                        query=query_vector,
+                        query_filter=q_filter,
+                        limit=fetch_limit,
+                        with_payload=True
+                    )
+                    all_points.extend(query_response.points)
+                else:
+                    pts = self.qdrant.search(
+                        collection_name=coll,
+                        query_vector=query_vector,
+                        query_filter=q_filter,
+                        limit=fetch_limit,
+                        with_payload=True
+                    )
+                    all_points.extend(pts)
+            except Exception as e:
+                log.warning(f"Vector search against '{coll}' encountered an issue: {e}")
+
+        # Sort combined candidate points by similarity score descending
+        all_points.sort(key=lambda p: float(p.score), reverse=True)
 
         results = []
-        for p in points:
+        seen_tile_ids = set()
+        for p in all_points:
             tile_id = p.payload.get("tile_id") if p.payload else str(p.id)
             score = float(p.score)
-            if tile_id:
+            if tile_id and tile_id not in seen_tile_ids:
+                seen_tile_ids.add(tile_id)
                 results.append((tile_id, score))
 
         return results
@@ -502,7 +539,8 @@ class VectorSearchService:
                 description = generate_tile_description(
                     mean_ndvi=r.get("mean_ndvi"),
                     mean_ndwi=r.get("mean_ndwi"),
-                    mean_ndbi=r.get("mean_ndbi")
+                    mean_ndbi=r.get("mean_ndbi"),
+                    sensor=r.get("sensor")
                 )
 
                 items.append(
@@ -610,6 +648,11 @@ class VectorSearchService:
             top_k=request.top_k,
             deduplicate_spatial=True
         )
+
+        # Image-to-image similarity threshold: Only show matches >= threshold (default 65% / 0.65)
+        if query_type == "image":
+            cutoff = request.min_similarity if request.min_similarity is not None else 0.65
+            results = [r for r in results if r.score >= cutoff]
 
         # Step 4: Audit Logging (Phase 2.5)
         result_ids = [r.tile_id for r in results]
