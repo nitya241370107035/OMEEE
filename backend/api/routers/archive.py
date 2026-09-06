@@ -102,7 +102,7 @@ def get_tiles(
                     t.thumbnail_path,
                     t.source_type,
                     t.created_at,
-                    ST_AsGeoJSON(t.footprint_geom) AS footprint_json
+                    ST_AsGeoJSON(t.geometry) AS footprint_json
                 FROM tiles t
                 {where_str}
                 ORDER BY t.created_at DESC
