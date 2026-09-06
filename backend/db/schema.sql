@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS tiles (
   cluster_id                     TEXT,                   -- filled by the discovery/clustering job
   file_path                            TEXT,               -- main GeoTIFF (full bit depth/bands)
   thumbnail_path                        TEXT,               -- 8-bit RGB preview JPG
+  bad_mask_path                         TEXT,               -- per-pixel bad-pixel/cloud mask GeoTIFF path
+  pixel_scale                           TEXT DEFAULT 'reflectance_fixed_10000', -- reflectance scaling standard
   band_order                              JSONB,              -- e.g. ["blue", "green", "red", "nir", "swir"]
   band_stats                               JSONB,              -- per-band min, max, mean summary
   mean_ndvi                                 FLOAT,              -- (NIR - Red) / (NIR + Red)
@@ -158,3 +160,5 @@ CREATE TABLE IF NOT EXISTS ingestion_coverage (
 -- * band_count / bit_depth / file_size_bytes were added after the
 --   per-tile storage sizing discussion — needed for the evaluation
 --   report's storage-footprint number.
+
+

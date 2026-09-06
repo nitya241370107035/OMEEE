@@ -72,3 +72,11 @@ scratch/
 *.tgz
 *.rar
 *.7z
+
+# 8. Temporary & Local Evaluation Scratch Scripts
+compare_*.py
+generate_*.py
+scratch_*.py
+show_cloudy_tiles.py
+verify_*.py
+datasets/defense_strategic_bases.geojson
