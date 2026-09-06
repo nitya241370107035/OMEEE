@@ -208,9 +208,10 @@
               </div>
               <div class="form-group">
                 <label>Sensor Constraint</label>
-                <select id="filterSensor">
+                <select id="filterSensor" onchange="syncDirectSensor(this.value)">
                   <option value="">Any Sensor (All)</option>
-                  <option value="Sentinel-2" selected>Sentinel-2 (10m Multi-Spectral)</option>
+                  <option value="Sentinel-2" selected>🛰️ Sentinel-2 (10m Multi-Spectral)</option>
+                  <option value="Maxar">🔍 Maxar High-Res (0.5m Optical)</option>
                 </select>
               </div>
               <div class="form-group">
@@ -244,6 +245,12 @@
               <span>⚙️</span>
               <span class="filter-badge" id="filterCountBadge" style="display: none;">0</span>
             </button>
+
+            <!-- Direct Dataset / Sensor Switcher -->
+            <select id="directSensorSelect" class="filter-select" style="background: rgba(15,23,42,0.9); border: 1px solid var(--border-color); color: var(--accent-cyan); font-size: 11px; font-weight: 600; border-radius: 6px; padding: 6px 8px; cursor: pointer;" onchange="onDirectSensorChange(this.value)">
+              <option value="Sentinel-2" selected>🛰️ Sentinel-2 (10m)</option>
+              <option value="Maxar">🔍 Maxar (0.5m)</option>
+            </select>
 
             <!-- Image File Upload Trigger -->
             <input type="file" id="searchImageFileInput" accept="image/*,.tif,.tiff" style="display: none;" onchange="onSearchImageSelected(event)">
@@ -360,7 +367,44 @@
              ENTRY POINT A FORM (AOI Polygon + Timeline)
              ========================================== -->
         <div id="aoiFormSection" style="display: flex; flex-direction: column; gap: 16px;">
-          <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.5;">
+          
+          <!-- Sensor Source Segmented Cards -->
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 600; color: var(--accent-cyan); margin-bottom: 8px; display: block;">Select Satellite Imagery Source:</label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div 
+                id="sensorCardSentinel" 
+                class="sensor-source-card active" 
+                onclick="setIngestionSensor('sentinel2')"
+                style="border: 2px solid var(--accent-blue); background: rgba(56,189,248,0.12); border-radius: 8px; padding: 12px; cursor: pointer; transition: all 0.2s;"
+              >
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 22px;">🛰️</span>
+                  <div>
+                    <div style="font-weight: 700; font-size: 13px; color: #fff;">Sentinel-2 Multi-Spectral</div>
+                    <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">10m GSD &bull; 13 Spectral Bands &bull; Cloud Mask &bull; NDVI/NDWI/NDBI</div>
+                  </div>
+                </div>
+              </div>
+
+              <div 
+                id="sensorCardMaxar" 
+                class="sensor-source-card" 
+                onclick="setIngestionSensor('maxar')"
+                style="border: 2px solid var(--border-color); background: rgba(255,255,255,0.02); border-radius: 8px; padding: 12px; cursor: pointer; transition: all 0.2s;"
+              >
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 22px;">🔍</span>
+                  <div>
+                    <div style="font-weight: 700; font-size: 13px; color: #fff;">Maxar High-Res Optical</div>
+                    <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">0.3m–0.5m Sub-Meter &bull; Wayback 2020–2026 Archive &bull; True Color RGB &bull; VARI</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="aoiDescriptionText" style="font-size: 13px; color: var(--text-secondary); line-height: 1.5; background: rgba(255,255,255,0.02); padding: 10px 12px; border-radius: 6px; border-left: 3px solid var(--accent-cyan);">
             Define an AOI polygon and choose the historical timeline (e.g. 1–10 years). The pipeline fetches all covering Sentinel-2 scenes, cleans cloud/shadow masks, normalizes, slices 512x512 tiles, computes indices (NDVI/NDWI/NDBI), and embeds into Qdrant & PostgreSQL.
           </div>
 
@@ -376,30 +420,41 @@
             <textarea id="geojsonInput" class="geojson-textarea" placeholder='{"type": "Polygon", "coordinates": [[[68.18, 25.47], [68.46, 25.47], [68.47, 25.25], [68.17, 25.28], [68.18, 25.47]]]}'></textarea>
           </div>
 
-          <!-- Timeline Selection -->
-          <div class="form-group">
-            <label class="form-label">Timeline Range (Multi-Temporal Coverage):</label>
+          <!-- Sentinel-2 Timeline Selection -->
+          <div class="form-group" id="sentinelTimelineGroup">
+            <label class="form-label">Timeline Range (Multi-Temporal Sentinel-2 Archive):</label>
             <div class="timeline-chips">
               <button class="timeline-chip" onclick="setTimelineYears(1)">1 Year</button>
               <button class="timeline-chip active" onclick="setTimelineYears(2)">2 Years (T1 vs T2)</button>
               <button class="timeline-chip" onclick="setTimelineYears(3)">3 Years</button>
               <button class="timeline-chip" onclick="setTimelineYears(5)">5 Years</button>
-              <button class="timeline-chip" onclick="setTimelineYears(10)">10 Years (Historical Archive)</button>
+              <button class="timeline-chip" onclick="setTimelineYears(10)">10 Years (Archive)</button>
               <button class="timeline-chip" onclick="setCustomTimeline()">Custom Dates</button>
+            </div>
+          </div>
+
+          <!-- Maxar Timeline Selection (2020 - 2026 Archive) -->
+          <div class="form-group" id="maxarTimelineGroup" style="display: none;">
+            <label class="form-label" style="color: var(--accent-cyan);">Maxar Wayback Historical Epochs (2020 – 2026 Archive):</label>
+            <div class="timeline-chips">
+              <button class="timeline-chip active" id="chipMaxar2020_2026" onclick="setMaxarEpochPreset('2020_2026')">2020 Baseline vs 2026 Contemporary</button>
+              <button class="timeline-chip" id="chipMaxar2022_2026" onclick="setMaxarEpochPreset('2022_2026')">2022 vs 2026</button>
+              <button class="timeline-chip" id="chipMaxarAll" onclick="setMaxarEpochPreset('all')">2020, 2022, 2024, 2026 (All Epochs)</button>
+              <button class="timeline-chip" id="chipMaxarCustom" onclick="setMaxarEpochPreset('custom')">Custom Dates</button>
             </div>
           </div>
 
           <!-- Date Pickers -->
           <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
             <div class="form-group">
-              <label class="form-label">Date From:</label>
+              <label class="form-label" id="dateFromLabel">Date From:</label>
               <input type="date" id="aoiDateFrom" class="modal-text-input" value="2023-01-01" />
             </div>
             <div class="form-group">
-              <label class="form-label">Date To:</label>
+              <label class="form-label" id="dateToLabel">Date To:</label>
               <input type="date" id="aoiDateTo" class="modal-text-input" value="2024-06-30" />
             </div>
-            <div class="form-group">
+            <div class="form-group" id="bucketSelectGroup">
               <label class="form-label">Time Buckets:</label>
               <select id="aoiBuckets" class="modal-select-input">
                 <option value="2" selected>2 Buckets (T1 & T2)</option>
@@ -428,33 +483,58 @@
              ========================================== -->
         <div id="fileFormSection" style="display: none; flex-direction: column; gap: 16px;">
           <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.5;">
-            100% Offline Ingestion for organizer-provided evaluation GeoTIFF files. Reads multi-band rasters, handles coordinate reprojection, extracts indices, and populates the archive.
+            100% Offline Ingestion for evaluation GeoTIFF files. Supports <strong>single multi-band rasters</strong> or <strong>multiple separate band files</strong> (e.g. Landsat 8/9 B2, B3, B4, B5, B6 folder).
           </div>
 
+          <!-- File Upload Zone (Supports Multiple Files) -->
           <div class="form-group">
-            <label class="form-label">Local File Path:</label>
-            <input type="text" id="filePathInput" class="modal-text-input" placeholder="e.g. data/evaluation/eval_scene_01.tif" />
+            <label class="form-label">Upload GeoTIFF File(s):</label>
+            <div id="fileDropZone" style="border: 2px dashed var(--border-color); border-radius: var(--radius-sm); padding: 18px; text-align: center; background: rgba(255,255,255,0.02); cursor: pointer; transition: border-color 0.2s;" onclick="document.getElementById('geoTiffFilesInput').click()">
+              <input type="file" id="geoTiffFilesInput" multiple accept=".tif,.tiff,.jp2" style="display: none;" onchange="handleGeoTiffFilesSelected(this.files)" />
+              <div style="font-size: 24px; margin-bottom: 6px;">📂</div>
+              <div style="font-size: 13px; font-weight: 500; color: var(--text-primary);">Click or drag GeoTIFF files here</div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Supports single multi-band .tif or multiple per-band .tif files (e.g. Landsat B2-B6)</div>
+            </div>
+            <div id="selectedFilesSummary" style="display: none; margin-top: 8px; font-size: 12px; color: var(--accent-cyan); font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
+          </div>
+
+          <!-- Or Server-Side Local Path -->
+          <div class="form-group">
+            <label class="form-label">Or Server Local Path / Directory (Optional):</label>
+            <input type="text" id="filePathInput" class="modal-text-input" placeholder="e.g. data/evaluation/eval_scene_01.tif or folder path" />
           </div>
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <div class="form-group">
+              <label class="form-label">Sensor Convention:</label>
+              <select id="fileSensor" class="modal-select-input">
+                <option value="auto" selected>Auto-Detect Sensor</option>
+                <option value="landsat">USGS Landsat 8/9 (B5=NIR, B4=Red)</option>
+                <option value="sentinel2">Copernicus Sentinel-2 (B8=NIR, B4=Red)</option>
+                <option value="generic">Generic Multi-Band / RGB</option>
+              </select>
+            </div>
+            <div class="form-group">
               <label class="form-label">Band Order:</label>
               <select id="fileBandOrder" class="modal-select-input">
-                <option value="blue,green,red,nir,swir" selected>5-Band (Blue, Green, Red, NIR, SWIR)</option>
+                <option value="auto" selected>Auto-Detect from Metadata / Filenames</option>
+                <option value="blue,green,red,nir,swir">5-Band (Blue, Green, Red, NIR, SWIR)</option>
                 <option value="red,green,blue,nir,swir">5-Band (Red, Green, Blue, NIR, SWIR)</option>
                 <option value="red,green,blue">3-Band RGB (Red, Green, Blue)</option>
                 <option value="blue,green,red">3-Band BGR (Blue, Green, Red)</option>
               </select>
             </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <div class="form-group">
               <label class="form-label">Acquisition Date:</label>
               <input type="date" id="fileAcqDate" class="modal-text-input" value="2024-03-22" />
             </div>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Region ID:</label>
-            <input type="text" id="fileRegionId" class="modal-text-input" placeholder="e.g. eval_sector_alpha" />
+            <div class="form-group">
+              <label class="form-label">Region ID Tag:</label>
+              <input type="text" id="fileRegionId" class="modal-text-input" placeholder="e.g. eval_sector_alpha" />
+            </div>
           </div>
         </div>
 
@@ -605,6 +685,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
   
   <!-- App JS -->
-  <script src="/frontend/app.js?v=20240903_5"></script>
+  <script src="/frontend/app.js?v=20240906_maxar_v5"></script>
 </body>
 </html>

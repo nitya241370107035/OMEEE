@@ -272,7 +272,100 @@ window.triggerDrawFromModal = function() {
 // ============================================================
 
 let currentIngestMode = 'aoi'; // 'aoi' or 'file'
+let currentIngestionSensor = 'sentinel2'; // 'sentinel2' or 'maxar'
 let selectedYears = 2;
+let selectedGeoTiffFiles = [];
+
+window.setIngestionSensor = function(sensor) {
+  currentIngestionSensor = sensor;
+  const cardSentinel = document.getElementById('sensorCardSentinel');
+  const cardMaxar = document.getElementById('sensorCardMaxar');
+  const sentinelGroup = document.getElementById('sentinelTimelineGroup');
+  const maxarGroup = document.getElementById('maxarTimelineGroup');
+  const descEl = document.getElementById('aoiDescriptionText');
+  const bucketGroup = document.getElementById('bucketSelectGroup');
+
+  if (sensor === 'maxar') {
+    if (cardSentinel) {
+      cardSentinel.style.border = '2px solid var(--border-color)';
+      cardSentinel.style.background = 'rgba(255,255,255,0.02)';
+    }
+    if (cardMaxar) {
+      cardMaxar.style.border = '2px solid var(--accent-cyan)';
+      cardMaxar.style.background = 'rgba(6,182,212,0.15)';
+    }
+    if (sentinelGroup) sentinelGroup.style.display = 'none';
+    if (maxarGroup) maxarGroup.style.display = 'block';
+    if (bucketGroup) bucketGroup.style.display = 'none';
+    if (descEl) {
+      descEl.innerHTML = `<strong>Maxar High-Resolution Optical Ingestion:</strong> Fetches sub-meter orthorectified imagery from the Maxar/Esri Wayback archive (2020–2026), slices 512×512 georeferenced GeoTIFFs, computes the VARI index, and stores embeddings in dedicated Qdrant collection <code>maxar_tile_embeddings</code>.`;
+    }
+    setMaxarEpochPreset('2020_2026');
+  } else {
+    if (cardSentinel) {
+      cardSentinel.style.border = '2px solid var(--accent-blue)';
+      cardSentinel.style.background = 'rgba(56,189,248,0.12)';
+    }
+    if (cardMaxar) {
+      cardMaxar.style.border = '2px solid var(--border-color)';
+      cardMaxar.style.background = 'rgba(255,255,255,0.02)';
+    }
+    if (sentinelGroup) sentinelGroup.style.display = 'block';
+    if (maxarGroup) maxarGroup.style.display = 'none';
+    if (bucketGroup) bucketGroup.style.display = 'block';
+    if (descEl) {
+      descEl.innerHTML = `Define an AOI polygon and choose the historical timeline (e.g. 1–10 years). The pipeline fetches all covering Sentinel-2 scenes, cleans cloud/shadow masks, normalizes, slices 512x512 tiles, computes indices (NDVI/NDWI/NDBI), and embeds into Qdrant & PostgreSQL.`;
+    }
+    setTimelineYears(2);
+  }
+};
+
+window.setMaxarEpochPreset = function(preset) {
+  document.querySelectorAll('#maxarTimelineGroup .timeline-chip').forEach(btn => btn.classList.remove('active'));
+  const activeBtn = document.getElementById(
+    preset === '2020_2026' ? 'chipMaxar2020_2026' :
+    preset === '2022_2026' ? 'chipMaxar2022_2026' :
+    preset === 'all' ? 'chipMaxarAll' : 'chipMaxarCustom'
+  );
+  if (activeBtn) activeBtn.classList.add('active');
+
+  const dateFrom = document.getElementById('aoiDateFrom');
+  const dateTo = document.getElementById('aoiDateTo');
+
+  if (preset === '2020_2026') {
+    if (dateFrom) dateFrom.value = '2020-08-12';
+    if (dateTo) dateTo.value = '2026-08-05';
+  } else if (preset === '2022_2026') {
+    if (dateFrom) dateFrom.value = '2022-10-19';
+    if (dateTo) dateTo.value = '2026-08-05';
+  } else if (preset === 'all') {
+    if (dateFrom) dateFrom.value = '2020-08-12';
+    if (dateTo) dateTo.value = '2026-08-05';
+  }
+};
+
+window.onDirectSensorChange = function(val) {
+  const filterSensor = document.getElementById('filterSensor');
+  if (filterSensor) filterSensor.value = val;
+  const directSelects = document.querySelectorAll('#directSensorSelect');
+  directSelects.forEach(s => s.value = val);
+};
+
+window.syncDirectSensor = function(val) {
+  const directSelects = document.querySelectorAll('#directSensorSelect');
+  directSelects.forEach(s => s.value = val || 'Sentinel-2');
+};
+
+window.handleGeoTiffFilesSelected = function(files) {
+  if (!files || files.length === 0) return;
+  selectedGeoTiffFiles = Array.from(files);
+  const summaryEl = document.getElementById('selectedFilesSummary');
+  if (summaryEl) {
+    summaryEl.style.display = 'block';
+    const names = selectedGeoTiffFiles.map(f => f.name).join(', ');
+    summaryEl.innerHTML = `✅ <strong>${selectedGeoTiffFiles.length} file(s) selected:</strong> ${names}`;
+  }
+};
 
 window.openIngestModal = function() {
   document.getElementById('ingestModal').classList.add('open');
@@ -292,8 +385,10 @@ window.switchIngestMode = function(mode) {
 
 window.setTimelineYears = function(years) {
   selectedYears = years;
-  document.querySelectorAll('.timeline-chip').forEach(btn => btn.classList.remove('active'));
-  event.target.classList.add('active');
+  document.querySelectorAll('#sentinelTimelineGroup .timeline-chip').forEach(btn => btn.classList.remove('active'));
+  if (event && event.target && event.target.classList.contains('timeline-chip')) {
+    event.target.classList.add('active');
+  }
 
   const today = new Date();
   const startYear = today.getFullYear() - years;
@@ -305,15 +400,17 @@ window.setTimelineYears = function(years) {
 
   // Auto-adjust suggested time buckets based on years
   const bucketSelect = document.getElementById('aoiBuckets');
-  if (years === 1) bucketSelect.value = "2";
-  else if (years <= 3) bucketSelect.value = "2";
-  else if (years <= 5) bucketSelect.value = "4";
-  else bucketSelect.value = "10";
+  if (bucketSelect) {
+    if (years === 1) bucketSelect.value = "2";
+    else if (years <= 3) bucketSelect.value = "2";
+    else if (years <= 5) bucketSelect.value = "4";
+    else bucketSelect.value = "10";
+  }
 };
 
 window.setCustomTimeline = function() {
-  document.querySelectorAll('.timeline-chip').forEach(btn => btn.classList.remove('active'));
-  event.target.classList.add('active');
+  document.querySelectorAll('#sentinelTimelineGroup .timeline-chip').forEach(btn => btn.classList.remove('active'));
+  if (event && event.target) event.target.classList.add('active');
 };
 
 // ============================================================
@@ -331,13 +428,24 @@ function animateProgressBar() {
 
   card.style.display = 'flex';
   bar.style.width = '10%';
-  label.innerText = '⚡ 1/5: Querying STAC Catalog & Selecting Granules...';
-  subtext.innerText = 'Scanning AWS Earth Search STAC for cloud-free Sentinel-2 scenes...';
+
+  const isMaxar = currentIngestionSensor === 'maxar';
+  label.innerText = isMaxar 
+    ? '🔍 1/4: Connecting to Maxar Wayback Archive & Selecting Epochs...' 
+    : '⚡ 1/5: Querying STAC Catalog & Selecting Granules...';
+  subtext.innerText = isMaxar
+    ? 'Selecting 2020 baseline and contemporary sub-meter orthorectified releases...'
+    : 'Scanning AWS Earth Search STAC for cloud-free Sentinel-2 scenes...';
 
   let seconds = 0;
   timer.innerText = '0s';
 
-  const steps = [
+  const steps = isMaxar ? [
+    { pct: 25, label: '🛰️ 2/4: Streaming High-Res Maxar WMTS Tiles & Stitching...', sub: 'Fetching sub-meter orthorectified image canvas across epochs...' },
+    { pct: 50, label: '✂️ 3/4: Slicing 512×512 Georeferenced Tiles & Computing VARI...', sub: 'Generating EPSG:4326 GeoTIFFs with Visible Atmospherically Resistant Index...' },
+    { pct: 75, label: '🧠 4/4: RemoteCLIP ViT-B-32 Vector Embeddings & Indexing...', sub: 'Embedding optical features into Qdrant maxar_tile_embeddings & PostgreSQL...' },
+    { pct: 90, label: '💾 Finalizing Database Registration & Map Coverage...', sub: 'Writing georeferenced sector polygons to PostgreSQL...' }
+  ] : [
     { pct: 25, label: '🛰️ 2/5: Streaming Cloud-Optimized GeoTIFFs (B2, B3, B4, B8, B11)...', sub: 'Reprojecting rasters to EPSG:4326 working canvas...' },
     { pct: 50, label: '☁️ 3/5: Computing Cloud & Shadow Masks + 2-98% Normalization...', sub: 'Filtering bad pixels and scaling dynamic range across 5 bands...' },
     { pct: 70, label: '✂️ 4/5: Slicing 512x512 Tiles & Calculating NDVI, NDWI, NDBI...', sub: 'Computing multi-spectral vegetation, water, and built-up indices...' },
@@ -410,68 +518,233 @@ window.startIngestion = async function() {
       const dateFromVal = document.getElementById('aoiDateFrom')?.value?.trim();
       const dateToVal = document.getElementById('aoiDateTo')?.value?.trim();
 
-      const payload = {
-        geojson_polygon: parsedGeojson,
-        region_id: document.getElementById('aoiRegionId')?.value?.trim() || undefined,
-        region_name: document.getElementById('aoiRegionName')?.value?.trim() || undefined,
-        date_from: dateFromVal && dateFromVal !== "" ? dateFromVal : undefined,
-        date_to: dateToVal && dateToVal !== "" ? dateToVal : undefined,
-        num_time_buckets: parseInt(document.getElementById('aoiBuckets')?.value, 10) || 2,
-        populate_db: true
-      };
+      if (currentIngestionSensor === 'maxar') {
+        // -- Maxar Async Job: POST ? job_id ? poll GET /job/{id} --
+        // Fixes ERR_EMPTY_RESPONSE for large AOIs that exceed browser timeout
+        const startYr = dateFromVal ? parseInt(dateFromVal.slice(0, 4), 10) : 2020;
+        const endYr = dateToVal ? parseInt(dateToVal.slice(0, 4), 10) : 2026;
+        const yearsList = (startYr === endYr) ? [startYr] : [startYr, endYr];
 
-      const res = await fetch(`${API_BASE}/api/v1/ingest/aoi`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+        const maxarPayload = {
+          geojson_polygon: parsedGeojson,
+          region_id: document.getElementById('aoiRegionId')?.value?.trim() || undefined,
+          region_name: document.getElementById('aoiRegionName')?.value?.trim() || undefined,
+          years: yearsList,
+          populate_db: true
+        };
 
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.detail || `Server returned error ${res.status}`);
-      }
+        console.log("[AeroLens] Submitting Maxar async job:", maxarPayload);
 
-      const result = await res.json();
-      stopProgressBar(true, `Ingested ${result.total_tiles_generated} tiles across ${result.scenes_processed.length} scenes in ${result.elapsed_seconds}s. Vector embeddings populated in Qdrant.`);
+        // Step 1: Submit � returns job_id INSTANTLY (no timeout risk)
+        const submitRes = await fetch(`${API_BASE}/api/v1/ingest/maxar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(maxarPayload)
+        });
 
-      // Reload Coverage and Zoom to New Region
-      await loadCoverageRegions();
-      if (result.region_id) {
-        document.getElementById('regionSelect').value = result.region_id;
-        onSelectRegion(result.region_id);
+        if (!submitRes.ok) {
+          const errData = await submitRes.json().catch(() => ({ detail: `HTTP ${submitRes.status}` }));
+          throw new Error(errData.detail || `Server returned error ${submitRes.status}`);
+        }
+
+        const submitResult = await submitRes.json();
+        const jobId = submitResult.job_id;
+        const regionId = submitResult.region_id;
+        console.log(`[AeroLens] Maxar job queued: ${jobId} for region: ${regionId}`);
+
+        if (!jobId) {
+          throw new Error("No job_id received from server.");
+        }
+
+        // Step 2: Poll every 3 seconds for job completion
+        const progressStages = [
+          { minPct: 0,  label: '??? 1/4: Connecting to Maxar Wayback Archive...', sub: 'Resolving release IDs for selected epochs...' },
+          { minPct: 10, label: '??? 2/4: Streaming WMTS Tiles & Stitching Canvas...', sub: 'Downloading sub-meter optical imagery from Esri Wayback...' },
+          { minPct: 30, label: '?? 3/4: Slicing 512�512 GeoTIFF Tiles...', sub: 'Polygon intersection & VARI index computation...' },
+          { minPct: 60, label: '?? 4/4: RemoteCLIP Embeddings ? Qdrant & PostgreSQL...', sub: 'Indexing tile vectors into maxar_tile_embeddings...' },
+        ];
+
+        const finalResult = await new Promise((resolve, reject) => {
+          let fakeProgress = 5;
+          const pollInterval = setInterval(async () => {
+            try {
+              const pollRes = await fetch(`${API_BASE}/api/v1/ingest/job/${jobId}`);
+              if (!pollRes.ok) {
+                clearInterval(pollInterval);
+                reject(new Error(`Poll failed: HTTP ${pollRes.status}`));
+                return;
+              }
+              const job = await pollRes.json();
+              console.log(`[AeroLens] Job ${jobId}:`, job.status, job.progress + '%', job.message);
+
+              // Animate progress bar based on server progress
+              fakeProgress = Math.max(fakeProgress, job.progress || fakeProgress + 3);
+              fakeProgress = Math.min(fakeProgress, 95); // cap at 95 until done
+              const bar = document.getElementById('ingestProgressBar');
+              const labelEl = document.getElementById('ingestStepLabel');
+              const subEl = document.getElementById('ingestSubLabel');
+              if (bar) bar.style.width = fakeProgress + '%';
+
+              // Pick UI stage label
+              const stage = progressStages.slice().reverse().find(s => fakeProgress >= s.minPct);
+              if (stage) {
+                if (labelEl) labelEl.innerText = stage.label;
+                if (subEl) subEl.innerText = stage.sub;
+              }
+
+              if (job.status === 'done') {
+                clearInterval(pollInterval);
+                resolve(job.result || {});
+              } else if (job.status === 'failed') {
+                clearInterval(pollInterval);
+                reject(new Error(job.message || 'Maxar pipeline failed'));
+              }
+            } catch (pollErr) {
+              clearInterval(pollInterval);
+              reject(pollErr);
+            }
+          }, 3000);
+        });
+
+        // Handle final result
+        if (!finalResult || finalResult.total_tiles_generated === 0) {
+          const errDetail = (finalResult && finalResult.errors && finalResult.errors.length > 0)
+            ? finalResult.errors.join("; ")
+            : "No tiles extracted. Check polygon coverage area.";
+          stopProgressBar(false, `Maxar returned 0 tiles: ${errDetail}`);
+          return;
+        }
+
+        const epochsCount = (finalResult.epochs_processed || []).length;
+        stopProgressBar(true,
+          `? Maxar Complete! ${finalResult.total_tiles_generated} sub-meter tiles, ` +
+          `${epochsCount} epoch(s), ${finalResult.elapsed_seconds?.toFixed(1)}s. ` +
+          `Indexed in 'maxar_tile_embeddings'.`
+        );
+
+        if (currentDrawLayer) { map.removeLayer(currentDrawLayer); currentDrawLayer = null; }
+        await loadCoverageRegions();
+        if (finalResult.region_id) {
+          const sel = document.getElementById('regionSelect');
+          if (sel) sel.value = finalResult.region_id;
+          onSelectRegion(finalResult.region_id);
+        }
+        setTimeout(() => closeIngestModal(), 1800);
+
+      } else {
+        // Standard Sentinel-2 Multi-Spectral Ingestion
+        const payload = {
+          geojson_polygon: parsedGeojson,
+          sensor: "sentinel2",
+          region_id: document.getElementById('aoiRegionId')?.value?.trim() || undefined,
+          region_name: document.getElementById('aoiRegionName')?.value?.trim() || undefined,
+          date_from: dateFromVal && dateFromVal !== "" ? dateFromVal : undefined,
+          date_to: dateToVal && dateToVal !== "" ? dateToVal : undefined,
+          num_time_buckets: parseInt(document.getElementById('aoiBuckets')?.value, 10) || 2,
+          populate_db: true
+        };
+
+        const res = await fetch(`${API_BASE}/api/v1/ingest/aoi`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+          throw new Error(errData.detail || `Server returned error ${res.status}`);
+        }
+
+        const result = await res.json();
+        stopProgressBar(true, `Ingested ${result.total_tiles_generated} tiles across ${result.scenes_processed ? result.scenes_processed.length : 1} scenes in ${result.elapsed_seconds}s. Vector embeddings populated in Qdrant.`);
+
+        if (currentDrawLayer) {
+          map.removeLayer(currentDrawLayer);
+          currentDrawLayer = null;
+        }
+
+        // Reload Coverage and Zoom to New Region
+        await loadCoverageRegions();
+        if (result.region_id) {
+          const sel = document.getElementById('regionSelect');
+          if (sel) sel.value = result.region_id;
+          onSelectRegion(result.region_id);
+        }
+
+        setTimeout(() => {
+          closeIngestModal();
+        }, 1800);
       }
 
     } else {
-      // Entry Point B: Offline File Ingestion
-      const filePath = document.getElementById('filePathInput').value.trim();
-      if (!filePath) {
-        throw new Error("Please provide the local file path to the GeoTIFF file.");
+      // Entry Point B: Offline File / Multi-File Ingestion
+      const filePath = document.getElementById('filePathInput')?.value?.trim();
+      const sensorVal = document.getElementById('fileSensor')?.value || 'auto';
+      const bandOrderVal = document.getElementById('fileBandOrder')?.value;
+      const customBandOrder = (bandOrderVal && bandOrderVal !== 'auto') ? bandOrderVal : undefined;
+      const acqDate = document.getElementById('fileAcqDate')?.value || undefined;
+      const regionId = document.getElementById('fileRegionId')?.value?.trim() || undefined;
+
+      if (selectedGeoTiffFiles && selectedGeoTiffFiles.length > 0) {
+        // Upload via FormData to /api/v1/ingest/upload
+        const formData = new FormData();
+        for (const f of selectedGeoTiffFiles) {
+          formData.append('files', f);
+        }
+        if (sensorVal) formData.append('sensor', sensorVal);
+        if (customBandOrder) formData.append('custom_band_order', customBandOrder);
+        if (acqDate) formData.append('acquisition_date', acqDate);
+        if (regionId) formData.append('region_id', regionId);
+
+        const res = await fetch(`${API_BASE}/api/v1/ingest/upload`, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.detail || `Server returned error ${res.status}`);
+        }
+
+        const result = await res.json();
+        stopProgressBar(true, `Uploaded and ingested ${result.total_tiles_generated} tiles from ${result.files_uploaded} file(s) in ${result.elapsed_seconds}s.`);
+        await loadCoverageRegions();
+        if (result.region_id) {
+          document.getElementById('regionSelect').value = result.region_id;
+          onSelectRegion(result.region_id);
+        }
+      } else if (filePath) {
+        // Server Local Path / Directory
+        const payload = {
+          file_path: filePath,
+          region_id: regionId,
+          sensor: sensorVal,
+          custom_band_order: (customBandOrder ? customBandOrder.split(',') : undefined),
+          acquisition_date: acqDate,
+          populate_db: true
+        };
+
+        const res = await fetch(`${API_BASE}/api/v1/ingest/file`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.detail || `Server returned error ${res.status}`);
+        }
+
+        const result = await res.json();
+        stopProgressBar(true, `Ingested ${result.total_tiles_generated} tiles from offline path in ${result.elapsed_seconds}s.`);
+        await loadCoverageRegions();
+        if (result.region_id) {
+          document.getElementById('regionSelect').value = result.region_id;
+          onSelectRegion(result.region_id);
+        }
+      } else {
+        throw new Error("Please select one or more GeoTIFF files to upload, or specify a server local path.");
       }
-
-      const bandOrder = document.getElementById('fileBandOrder').value.split(',');
-      const payload = {
-        file_path: filePath,
-        region_id: document.getElementById('fileRegionId').value.trim() || undefined,
-        custom_band_order: bandOrder,
-        acquisition_date: document.getElementById('fileAcqDate').value,
-        populate_db: true
-      };
-
-      const res = await fetch(`${API_BASE}/api/v1/ingest/file`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.detail || `Server returned error ${res.status}`);
-      }
-
-      const result = await res.json();
-      stopProgressBar(true, `Ingested ${result.total_tiles_generated} tiles from offline GeoTIFF file in ${result.elapsed_seconds}s.`);
-
-      await loadCoverageRegions();
     }
 
   } catch (err) {
@@ -549,7 +822,9 @@ window.submitSemanticSearch = async function() {
 
   // 1. Gather Filters
   const topK = parseInt(document.getElementById('filterTopK')?.value || '5', 10);
-  const rawSensor = document.getElementById('filterSensor')?.value?.trim();
+  const directSensor = document.getElementById('directSensorSelect')?.value;
+  const popoverSensor = document.getElementById('filterSensor')?.value?.trim();
+  const rawSensor = (directSensor && directSensor !== "") ? directSensor : popoverSensor;
   const sensor = (rawSensor && rawSensor !== "" && rawSensor !== "Any") ? rawSensor : undefined;
   const startDate = document.getElementById('filterStartDate')?.value || undefined;
   const endDate = document.getElementById('filterEndDate')?.value || undefined;
@@ -582,6 +857,7 @@ window.submitSemanticSearch = async function() {
       if (endDate) formData.append('end_date', endDate);
       formData.append('min_quality', minQuality.toString());
       formData.append('max_cloud_pct', maxCloud.toString());
+      formData.append('min_similarity', '0.65');
 
       const res = await fetch(`${API_BASE}/api/v1/search/image`, {
         method: 'POST',
@@ -709,7 +985,7 @@ function renderAssistantResultsBubble(response) {
       <div class="chat-bubble">
         ${headerHtml}
         <div class="chat-text" style="color: var(--text-secondary);">
-          No matching tiles found for this query within the selected filter constraints. Try broadening your date range or adjusting quality filters.
+          ${response.query_type === 'image' ? 'No matching tiles found with similarity >= 65% for this reference image. Try broadening your filters or uploading a different scene.' : 'No matching tiles found for this query within the selected filter constraints. Try broadening your date range or adjusting quality filters.'}
         </div>
       </div>
     `;
