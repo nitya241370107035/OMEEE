@@ -14,7 +14,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../backend/db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
-      - ../backend/db/seed.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eo_admin} -d ${POSTGRES_DB:-eo_archive}"]
       interval: 5s
@@ -26,9 +25,9 @@ services:
     image: qdrant/qdrant:v1.12.4
     container_name: eo_qdrant
     restart: unless-stopped
-    ports:
-      - "6333:6333"   # REST API
-      - "6334:6334"   # gRPC API
+    expose:
+      - "6333"   # REST API
+      - "6334"   # gRPC API
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
@@ -77,7 +76,7 @@ services:
       - MINIO_SECRET_KEY=eo_password
       - PORT=8000
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:8000"
     volumes:
       - ../data:/app/data
       - ../models:/app/models

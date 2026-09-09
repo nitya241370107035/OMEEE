@@ -87,10 +87,12 @@ CREATE INDEX IF NOT EXISTS change_events_conf_idx ON change_events (confidence);
 -- 4. CLUSTERS — groups discovered by the HDBSCAN job over embeddings
 -- ============================================================
 CREATE TABLE IF NOT EXISTS clusters (
-  cluster_id     TEXT PRIMARY KEY,
-  label           TEXT,                 -- optional human-readable name
-  computed_at      TIMESTAMP DEFAULT now(),
-  model_version     TEXT
+  cluster_id               TEXT PRIMARY KEY,
+  label                    TEXT,                 -- optional human-readable name
+  representative_tile_id   TEXT,                 -- medoid representative tile
+  tile_count               INT DEFAULT 0,
+  computed_at              TIMESTAMP DEFAULT now(),
+  model_version            TEXT
 );
 
 -- ============================================================

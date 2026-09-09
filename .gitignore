@@ -66,7 +66,7 @@ scratch/
 .system_generated/
 
 # 7. Archives & Compressed Dumps
-*.zip
+.zip
 *.tar
 *.tar.gz
 *.tgz
