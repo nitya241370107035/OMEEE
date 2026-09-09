@@ -3,53 +3,714 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AeroLens — Terrain & Feature Clustering Workbench</title>
-  <link rel="stylesheet" href="/frontend/index.css">
+  <title>AeroLens — Discovery & Clustering Workbench (PS 2.2.4)</title>
+  <link rel="stylesheet" href="/frontend/index.css?v=20260908_v4">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
     .nav-item.active {
       background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(99, 102, 241, 0.25));
       border-color: var(--border-active);
       color: #38bdf8;
     }
+
+    /* Guaranteed Self-Contained Clustering Layout */
+    html, body {
+      height: 100vh;
+      margin: 0;
+      padding: 0;
+      background-color: #070a12;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      font-family: 'Inter', sans-serif;
+    }
+    .content-container {
+      flex: 1;
+      height: calc(100vh - 64px);
+      overflow-y: auto !important;
+      overflow-x: hidden;
+      display: block;
+      background: radial-gradient(circle at 50% 0%, rgba(6, 182, 212, 0.05) 0%, transparent 60%),
+                  radial-gradient(circle at 100% 100%, rgba(99, 102, 241, 0.05) 0%, transparent 50%);
+    }
+    .clustering-container {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .clustering-hud-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    .clustering-hud-card {
+      background: rgba(13, 18, 31, 0.75);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: all 0.25s ease;
+    }
+    .clustering-hud-card:hover {
+      border-color: #06b6d4;
+      box-shadow: 0 4px 20px rgba(6, 182, 212, 0.15);
+      transform: translateY(-2px);
+    }
+    .clustering-hud-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #64748b;
+      font-family: 'JetBrains Mono', monospace;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .clustering-hud-val {
+      font-size: 24px;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -0.5px;
+    }
+    .clustering-hud-sub {
+      font-size: 12px;
+      color: #94a3b8;
+    }
+    .cluster-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 20px;
+    }
+    .cluster-card {
+      background: rgba(13, 18, 31, 0.85);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: all 0.25s ease;
+      cursor: pointer;
+      position: relative;
+    }
+    .cluster-card:hover {
+      border-color: #06b6d4;
+      box-shadow: 0 8px 30px rgba(6, 182, 212, 0.2);
+      transform: translateY(-3px);
+    }
+    .cluster-thumb-wrap {
+      width: 100%;
+      height: 180px;
+      position: relative;
+      background: #000;
+      overflow: hidden;
+    }
+    .cluster-thumb-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.4s ease;
+    }
+    .cluster-badge {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      background: rgba(7, 10, 18, 0.85);
+      backdrop-filter: blur(8px);
+      color: #38bdf8;
+      font-weight: 700;
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      border: 1px solid rgba(6, 182, 212, 0.5);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .cluster-count-badge {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: #06b6d4;
+      color: #000;
+      font-weight: 800;
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+    }
+    .cluster-body {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex: 1;
+    }
+    .cluster-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1.4;
+    }
+    .cluster-meta-row {
+      font-size: 11px;
+      color: #64748b;
+      font-family: 'JetBrains Mono', monospace;
+      display: flex;
+      justify-content: space-between;
+    }
+    .cluster-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: auto;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .cluster-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      background: rgba(13, 18, 31, 0.7);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 12px 18px;
+      margin-bottom: 20px;
+    }
+    .cluster-filter-pills {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .cluster-pill {
+      padding: 6px 14px;
+      border-radius: 9999px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #94a3b8;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .cluster-pill:hover, .cluster-pill.active {
+      background: linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(99, 102, 241, 0.2));
+      border-color: #06b6d4;
+      color: #38bdf8;
+      box-shadow: 0 0 12px rgba(6, 182, 212, 0.25);
+    }
   </style>
+
+  <!-- Immediate Global Fallback for Thumbnail Errors -->
+  <script>
+    function handleTileThumbError(img, tileId) {
+      if (!img) return;
+      img.onerror = null;
+      const cleanId = (tileId || 'Satellite Tile').toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">' +
+        '<rect width="512" height="512" fill="#0d1424"/>' +
+        '<defs>' +
+          '<radialGradient id="grad" cx="50%" cy="50%" r="50%">' +
+            '<stop offset="0%" stop-color="#1e293b"/>' +
+            '<stop offset="100%" stop-color="#070a12"/>' +
+          '</radialGradient>' +
+          '<pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">' +
+            '<path d="M 32 0 L 0 0 0 32" fill="none" stroke="rgba(6,182,212,0.12)" stroke-width="1"/>' +
+          '</pattern>' +
+        '</defs>' +
+        '<rect width="512" height="512" fill="url(#grad)"/>' +
+        '<rect width="512" height="512" fill="url(#grid)"/>' +
+        '<circle cx="256" cy="256" r="140" fill="none" stroke="rgba(6,182,212,0.25)" stroke-width="2" stroke-dasharray="6,6"/>' +
+        '<line x1="256" y1="80" x2="256" y2="432" stroke="rgba(6,182,212,0.3)" stroke-width="1.5"/>' +
+        '<line x1="80" y1="256" x2="432" y2="256" stroke="rgba(6,182,212,0.3)" stroke-width="1.5"/>' +
+        '<text x="256" y="240" font-family="monospace" font-size="28" fill="#38bdf8" text-anchor="middle" font-weight="bold">🛰️ SATELLITE TILE</text>' +
+        '<text x="256" y="275" font-family="monospace" font-size="14" fill="#94a3b8" text-anchor="middle">512x512 HIGH-RES</text>' +
+        '<text x="256" y="315" font-family="monospace" font-size="11" fill="#64748b" text-anchor="middle">' + cleanId + '</text>' +
+      '</svg>';
+      img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+    }
+  </script>
 </head>
 <body>
+  <!-- Global Application Header -->
   <header>
     <div class="logo-section">
       <div class="logo-badge">🛰️</div>
       <div>
-        <div class="logo-title">AEROLENS &bull; CLUSTERING WORKBENCH</div>
-        <div class="logo-subtitle">HIGH-DIMENSIONAL VECTOR PARTITIONING &bull; DEFENSE DGIS</div>
+        <div class="logo-title">AEROLENS &bull; DISCOVERY & CLUSTERING</div>
+        <div class="logo-subtitle">GLOBAL ARCHIVE PARTITIONING &bull; PS 2.2.4 &bull; DEFENSE DGIS</div>
       </div>
     </div>
     <nav class="nav-links">
       <a href="/" class="nav-item" id="nav-map" style="text-decoration: none;"><span>🗺️</span> Map & Coverage</a>
       <a href="/retrieval.html" class="nav-item" id="nav-retrieval" style="text-decoration: none;"><span>🔍</span> Semantic Retrieval</a>
       <a href="/change.html" class="nav-item" id="nav-change" style="text-decoration: none;"><span>🔄</span> Change Detection</a>
-      <a href="/clustering.html" class="nav-item active" id="nav-clustering" style="text-decoration: none;"><span>📊</span> Clustering</a>
+      <a href="/clustering.html" class="nav-item active" id="nav-clustering" style="text-decoration: none;"><span>📊</span> Clustering & Discovery</a>
       <a href="/review.html" class="nav-item" id="nav-review" style="text-decoration: none;"><span>📝</span> Review Tool</a>
     </nav>
     <div class="header-status">
-      <a href="/" class="ingest-aoi-nav-btn" style="text-decoration: none;"><span>🗺️</span> Open Map Explorer</a>
-      <span class="tag-badge">Phase 4</span>
+      <button class="map-btn primary" id="recomputeClusterBtn" onclick="triggerClusteringRecompute()" style="font-weight: 700;">
+        <span>🔄</span> Recompute Clusters
+      </button>
+      <span class="tag-badge">PS 2.2.4</span>
     </div>
   </header>
 
-  <div class="content-container">
-    <div class="coming-soon-wrapper">
-      <div class="coming-soon-card">
-        <div class="coming-soon-icon">📊</div>
-        <h2>Terrain & Feature Clustering</h2>
-        <p>
-          Unsupervised semantic grouping of land-use patterns and military terrain features across ingested sectors using high-dimensional vector clustering and spectral profiling.
-        </p>
-        <div class="badge-cluster">
-          <span class="feature-tag">k-Means Vector Partitioning</span>
-          <span class="feature-tag">Spectral Signature Profiling</span>
-          <span class="feature-tag">Defense Terrain Classification</span>
+  <!-- Main Clustering Workbench Layout -->
+  <main class="content-container">
+    <div class="clustering-container">
+
+      <!-- Executive Metric HUD Bar -->
+      <section class="clustering-hud-grid">
+        <div class="clustering-hud-card">
+          <div class="clustering-hud-label"><span>📊</span> Total Discovered Clusters</div>
+          <div class="clustering-hud-val" id="hudTotalClusters">--</div>
+          <div class="clustering-hud-sub">Unsupervised High-D Partitioning</div>
+        </div>
+        <div class="clustering-hud-card">
+          <div class="clustering-hud-label"><span>🛰️</span> Clustered Archive Tiles</div>
+          <div class="clustering-hud-val" id="hudClusteredTiles">--</div>
+          <div class="clustering-hud-sub">Across All Ingested Sectors</div>
+        </div>
+        <div class="clustering-hud-card">
+          <div class="clustering-hud-label"><span>🌐</span> Embedding Space</div>
+          <div class="clustering-hud-val" style="font-size: 18px; color: #38bdf8;">RemoteCLIP (512-D)</div>
+          <div class="clustering-hud-sub">ViT-B-32 Deep Geospatial Vision</div>
+        </div>
+        <div class="clustering-hud-card">
+          <div class="clustering-hud-label"><span>⚙️</span> Cluster Engine</div>
+          <div class="clustering-hud-val" style="font-size: 18px; color: #a855f7;">HDBSCAN / KMeans</div>
+          <div class="clustering-hud-sub" id="hudLastComputed">Last run: Checking...</div>
+        </div>
+      </section>
+
+      <!-- Section 1: Discovered Clusters Overview Grid -->
+      <section id="clustersOverviewSection">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <div>
+            <h2 style="font-size: 18px; font-weight: 800; color: #fff; margin: 0;">Discovered Terrain & Infrastructure Clusters</h2>
+            <p style="font-size: 12px; color: var(--text-secondary); margin: 4px 0 0 0;">
+              Groups visually and semantically coherent tiles across multiple geographic regions without spatial boundary restrictions.
+            </p>
+          </div>
+        </div>
+
+        <!-- Cluster Filter & Search Toolbar -->
+        <div class="cluster-toolbar">
+          <div class="cluster-filter-pills">
+            <button class="cluster-pill active" onclick="filterClustersByCategory('all', this)">🌐 All Clusters</button>
+            <button class="cluster-pill" onclick="filterClustersByCategory('vegetat', this)">🌾 Vegetative & Fields</button>
+            <button class="cluster-pill" onclick="filterClustersByCategory('water', this)">🌊 Water & Coastal</button>
+            <button class="cluster-pill" onclick="filterClustersByCategory('urban', this)">🏙️ Urban & Built-Up</button>
+            <button class="cluster-pill" onclick="filterClustersByCategory('arid', this)">🏜️ Arid & Transition</button>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <input type="text" id="clusterSearchInput" placeholder="Search clusters by name or ID..." oninput="handleClusterSearch(this.value)" 
+              style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: #fff; border-radius: var(--radius-full); padding: 7px 16px; font-size: 12px; outline: none; width: 260px; font-family: 'Inter', sans-serif;">
+            <button class="map-btn" onclick="loadClustersWorkbench()" style="padding: 7px 14px; font-size: 12px;">🔄 Refresh</button>
+          </div>
+        </div>
+
+        <div id="clustersGrid" class="cluster-grid">
+          <!-- Dynamic Cluster Cards Injected Here -->
+          <div style="grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: var(--text-muted);">
+            <div class="status-dot" style="margin: 0 auto 12px auto;"></div>
+            Loading discovered terrain clusters from database...
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 2: Cluster Member Tiles Drill-Down (Hidden by default) -->
+      <section id="clusterDrilldownSection" style="display: none;">
+        <div style="background: rgba(13, 18, 31, 0.85); backdrop-filter: blur(14px); border: 1px solid var(--border-active); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <button class="map-btn" onclick="closeClusterDrilldown()" style="padding: 4px 10px; font-size: 11px;">
+                  &larr; Back to Clusters
+                </button>
+                <span class="cluster-badge" id="drilldownClusterBadge" style="position: static;">Cluster X</span>
+              </div>
+              <h3 id="drilldownClusterTitle" style="font-size: 16px; font-weight: 700; color: #38bdf8; margin: 8px 0 4px 0;">
+                Cluster Members
+              </h3>
+              <p id="drilldownClusterSubtitle" style="font-size: 12px; color: var(--text-muted); margin: 0;">
+                Showing member tiles from this semantic cluster
+              </p>
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <button class="map-btn primary" id="viewClusterOnMapBtn" onclick="viewCurrentClusterOnMap()" style="padding: 8px 16px; font-weight: 700; background: #06b6d4; color: #000;">
+                🗺️ View Entire Cluster on Map
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Member Tiles Grid -->
+        <div id="clusterTilesGrid" class="retrieval-results-grid">
+          <!-- Dynamically Injected Tiles -->
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- Tile Inspect & Lineage Modal (Reused Component) -->
+  <div class="inspect-modal-backdrop" id="tileInspectModal">
+    <div class="inspect-modal-card">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div class="logo-badge" style="width: 32px; height: 32px; font-size: 16px;">🔍</div>
+          <div>
+            <h3 id="inspectTileTitle" style="font-size: 16px; font-weight: 700;">Tile Inspection & Lineage</h3>
+            <span id="inspectTileSubtitle" style="font-size: 12px; color: var(--text-muted);">RemoteCLIP Embedded Tile</span>
+          </div>
+        </div>
+        <button class="modal-close-btn" onclick="closeTileInspect()">&times;</button>
+      </div>
+
+      <div class="modal-body inspect-modal-body">
+        <div class="inspect-media-column">
+          <div class="inspect-img-wrap">
+            <img id="inspectTileImage" src="" alt="Tile Preview" onerror="handleTileThumbError(this, 'Tile')">
+            <div class="inspect-score-badge" id="inspectScoreBadge">Active Medoid</div>
+          </div>
+          <div class="inspect-description-box" id="inspectDescriptionBox">
+            Spectral indices and feature breakdown.
+          </div>
+          <div class="inspect-action-buttons">
+            <button class="map-btn primary" id="inspectOpenMapBtn" onclick="inspectOpenInMapClicked()">
+              🗺️ Open in Map View
+            </button>
+            <button class="map-btn" id="inspectFindSimilarBtn" onclick="inspectFindSimilarClicked()" style="background: linear-gradient(135deg, rgba(6,182,212,0.25), rgba(99,102,241,0.25)); border-color: var(--accent-cyan); color: #38bdf8; font-weight: 600;">
+              🔍 Find Similar Sites (Discovery)
+            </button>
+            <a id="inspectDownloadTifBtn" href="#" download class="map-btn" style="text-decoration: none; text-align: center;">
+              💾 Download GeoTIFF (.tif)
+            </a>
+          </div>
+        </div>
+
+        <div class="inspect-details-column">
+          <h4 style="color: var(--accent-cyan); font-size: 13px; text-transform: uppercase; margin-bottom: 10px;">Multi-Spectral Indices</h4>
+          <div class="spectral-meter-card">
+            <div class="spectral-meter-row">
+              <span class="meter-label">Vegetation Index (NDVI)</span>
+              <span class="meter-value" id="inspectValNdvi">--</span>
+            </div>
+            <div class="meter-bar-track">
+              <div class="meter-bar-fill fill-ndvi" id="inspectBarNdvi" style="width: 50%;"></div>
+            </div>
+          </div>
+          <div class="spectral-meter-card">
+            <div class="spectral-meter-row">
+              <span class="meter-label">Water Body Index (NDWI)</span>
+              <span class="meter-value" id="inspectValNdwi">--</span>
+            </div>
+            <div class="meter-bar-track">
+              <div class="meter-bar-fill fill-ndwi" id="inspectBarNdwi" style="width: 50%;"></div>
+            </div>
+          </div>
+          <div class="spectral-meter-card">
+            <div class="spectral-meter-row">
+              <span class="meter-label">Built-Up Index (NDBI)</span>
+              <span class="meter-value" id="inspectValNdbi">--</span>
+            </div>
+            <div class="meter-bar-track">
+              <div class="meter-bar-fill fill-ndbi" id="inspectBarNdbi" style="width: 50%;"></div>
+            </div>
+          </div>
+
+          <h4 style="color: var(--accent-cyan); font-size: 13px; text-transform: uppercase; margin: 16px 0 10px 0;">Tile Metadata & Coordinates</h4>
+          <table class="inspect-metadata-table">
+            <tr><td>Tile Identifier</td><td class="mono-val" id="inspectMetaTileId">--</td></tr>
+            <tr><td>Scene / Orbit</td><td class="mono-val" id="inspectMetaSceneId">--</td></tr>
+            <tr><td>Acquisition Date</td><td class="mono-val" id="inspectMetaDate">--</td></tr>
+            <tr><td>Centroid WGS84</td><td class="mono-val" id="inspectMetaCoords">--</td></tr>
+            <tr><td>Cloud Coverage</td><td class="mono-val" id="inspectMetaCloud">--</td></tr>
+            <tr><td>Quality Confidence</td><td class="mono-val" id="inspectMetaQuality">--</td></tr>
+          </table>
         </div>
       </div>
     </div>
   </div>
+
+  <script src="/frontend/app.js?v=20260908_v6"></script>
+  <script>
+    let activeClusters = [];
+    let currentFilter = 'all';
+    let currentSearchQuery = '';
+    let currentClusterTiles = [];
+    let currentSelectedCluster = null;
+
+    async function loadClustersWorkbench() {
+      const grid = document.getElementById('clustersGrid');
+      try {
+        const res = await fetch('/api/v1/clusters');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        activeClusters = await res.json();
+
+        // Update HUD
+        document.getElementById('hudTotalClusters').innerText = activeClusters.length;
+        const totalClustered = activeClusters.reduce((acc, c) => acc + (c.tile_count || 0), 0);
+        document.getElementById('hudClusteredTiles').innerText = totalClustered;
+
+        if (activeClusters.length > 0 && activeClusters[0].computed_at) {
+          const dt = new Date(activeClusters[0].computed_at);
+          document.getElementById('hudLastComputed').innerText = `Last run: ${dt.toLocaleTimeString()}`;
+        }
+
+        renderFilteredClusters();
+      } catch (err) {
+        grid.innerHTML = `<div style="grid-column: 1 / -1; color: #f87171; text-align: center; padding: 40px;">Failed to load clusters: ${err.message}</div>`;
+      }
+    }
+
+    function filterClustersByCategory(cat, btn) {
+      currentFilter = cat.toLowerCase();
+      document.querySelectorAll('.cluster-pill').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      renderFilteredClusters();
+    }
+
+    function handleClusterSearch(val) {
+      currentSearchQuery = (val || '').toLowerCase().trim();
+      renderFilteredClusters();
+    }
+
+    function renderFilteredClusters() {
+      const grid = document.getElementById('clustersGrid');
+      if (!activeClusters || activeClusters.length === 0) {
+        grid.innerHTML = `
+          <div style="grid-column: 1 / -1; text-align: center; padding: 60px 20px; background: rgba(13,18,31,0.6); border: 1px dashed var(--border-color); border-radius: var(--radius-lg);">
+            <div style="font-size: 32px; margin-bottom: 12px;">📊</div>
+            <h3 style="color: #fff; margin-bottom: 8px;">No Clusters Computed Yet</h3>
+            <p style="color: var(--text-muted); max-width: 480px; margin: 0 auto 16px auto; font-size: 13px;">
+              The archive has tile embeddings stored in Qdrant, but the standalone clustering job has not been executed yet.
+            </p>
+            <button class="map-btn primary" onclick="triggerClusteringRecompute()" style="margin: 0 auto; padding: 10px 20px; font-weight: 700;">
+              🚀 Compute Clusters Now
+            </button>
+          </div>
+        `;
+        return;
+      }
+
+      let filtered = activeClusters;
+      if (currentFilter !== 'all') {
+        filtered = filtered.filter(c => {
+          const lbl = (c.label || '').toLowerCase();
+          return lbl.includes(currentFilter);
+        });
+      }
+
+      if (currentSearchQuery) {
+        filtered = filtered.filter(c => {
+          const lbl = (c.label || '').toLowerCase();
+          const cid = (c.cluster_id || '').toLowerCase();
+          const med = (c.representative_tile_id || '').toLowerCase();
+          return lbl.includes(currentSearchQuery) || cid.includes(currentSearchQuery) || med.includes(currentSearchQuery);
+        });
+      }
+
+      if (filtered.length === 0) {
+        grid.innerHTML = `
+          <div style="grid-column: 1 / -1; text-align: center; padding: 50px 20px; color: var(--text-muted);">
+            <div style="font-size: 28px; margin-bottom: 8px;">🔍</div>
+            No clusters match the selected filter.
+          </div>
+        `;
+        return;
+      }
+
+      // Render Cluster Cards
+      grid.innerHTML = filtered.map((c, idx) => {
+        let thumb = c.thumbnail_url;
+        if (!thumb || thumb === 'null') {
+          thumb = '/data/tiles/sample_thumb.jpg';
+        } else {
+          if (thumb.startsWith('//')) thumb = thumb.replace(/^\/+/, '/');
+          if (thumb.startsWith('/app/')) thumb = thumb.replace('/app/', '/');
+          else if (thumb.startsWith('app/')) thumb = thumb.replace('app/', '/');
+        }
+        return `
+          <div class="cluster-card" id="clusterCard_${c.cluster_id}" onclick="exploreCluster('${c.cluster_id}')">
+            <div class="cluster-thumb-wrap">
+              <img class="cluster-thumb-img" src="${thumb}" alt="${c.label}" onerror="handleTileThumbError(this, '${c.cluster_id}')">
+              <div class="cluster-badge">Cluster #${idx + 1}</div>
+              <div class="cluster-count-badge">${c.tile_count} Tiles</div>
+            </div>
+            <div class="cluster-body">
+              <div class="cluster-title">${escapeHtml(c.label)}</div>
+              <div class="cluster-meta-row">
+                <span>Medoid: <code>${c.representative_tile_id ? c.representative_tile_id.slice(0, 20) + '...' : 'N/A'}</code></span>
+                <span>${c.sensor || 'Multi-Sensor'}</span>
+              </div>
+              <div class="cluster-actions" onclick="event.stopPropagation()">
+                <button class="map-btn" onclick="exploreCluster('${c.cluster_id}')">
+                  📂 Browse Tiles
+                </button>
+                <button class="map-btn primary" onclick="pinClusterOnMap('${c.cluster_id}')" style="font-size: 11px;">
+                  🗺️ Pin on Map
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function triggerClusteringRecompute() {
+      const btn = document.getElementById('recomputeClusterBtn');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="status-dot"></span> Recomputing...`;
+      }
+
+      try {
+        const res = await fetch('/api/v1/clusters/recompute', { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+        const data = await res.json();
+        alert(`Clustering Complete!\n\nDiscovered: ${data.clusters_count} clusters across ${data.total_points} tiles in ${data.elapsed_seconds}s.`);
+        await loadClustersWorkbench();
+      } catch (err) {
+        alert(`Clustering job failed: ${err.message}`);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = `<span>🔄</span> Recompute Clusters`;
+        }
+      }
+    }
+
+    async function exploreCluster(clusterId) {
+      const cluster = activeClusters.find(c => c.cluster_id === clusterId);
+      if (!cluster) return;
+
+      currentSelectedCluster = cluster;
+
+      // Update Card active states
+      document.querySelectorAll('.cluster-card').forEach(c => c.classList.remove('active'));
+      const activeCard = document.getElementById(`clusterCard_${clusterId}`);
+      if (activeCard) activeCard.classList.add('active');
+
+      const drilldown = document.getElementById('clusterDrilldownSection');
+      const tilesGrid = document.getElementById('clusterTilesGrid');
+      drilldown.style.display = 'block';
+
+      document.getElementById('drilldownClusterBadge').innerText = cluster.cluster_id;
+      document.getElementById('drilldownClusterTitle').innerText = cluster.label;
+      document.getElementById('drilldownClusterSubtitle').innerText = `Displaying ${cluster.tile_count} member tiles belonging to this semantic cluster`;
+
+      tilesGrid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-muted);"><div class="status-dot" style="margin: 0 auto 10px auto;"></div> Loading cluster member tiles...</div>`;
+
+      // Scroll to drilldown
+      drilldown.scrollIntoView({ behavior: 'smooth' });
+
+      try {
+        const res = await fetch(`/api/v1/clusters/${encodeURIComponent(clusterId)}/tiles?limit=60`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        currentClusterTiles = await res.json();
+
+        // Cache for inspect modal
+        currentClusterTiles.forEach(t => {
+          if (!currentSearchResults.some(x => x.tile_id === t.tile_id)) {
+            currentSearchResults.push(t);
+          }
+        });
+
+        if (!currentClusterTiles || currentClusterTiles.length === 0) {
+          tilesGrid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 30px; color: var(--text-muted);">No member tiles found in this cluster.</div>`;
+          return;
+        }
+
+        tilesGrid.innerHTML = currentClusterTiles.map((item, idx) => {
+          const thumbUrl = getTileThumbnailUrl(item);
+          const dateStr = item.acquisition_date ? item.acquisition_date.split('T')[0] : 'Unknown Date';
+          const isMedoid = item.tile_id === cluster.representative_tile_id;
+
+          const ndviVal = item.mean_ndvi !== null && item.mean_ndvi !== undefined ? item.mean_ndvi.toFixed(2) : '-';
+          const ndwiVal = item.mean_ndwi !== null && item.mean_ndwi !== undefined ? item.mean_ndwi.toFixed(2) : '-';
+          const ndbiVal = item.mean_ndbi !== null && item.mean_ndbi !== undefined ? item.mean_ndbi.toFixed(2) : '-';
+
+          return `
+            <div class="result-card" style="${isMedoid ? 'border-color: #06b6d4; box-shadow: 0 0 16px rgba(6,182,212,0.3);' : ''}">
+              <div class="result-thumb-wrap">
+                <img class="result-thumb-img" src="${thumbUrl}" alt="${item.tile_id}" onerror="handleTileThumbError(this, '${item.tile_id}')">
+                ${isMedoid ? '<div class="result-score-badge" style="background: #06b6d4; color: #000; font-weight: 800;">⭐ MEDOID</div>' : `<div class="result-score-badge">#${idx + 1}</div>`}
+              </div>
+              <div class="result-body">
+                <div class="result-title-row">
+                  <span class="result-tile-id">${item.tile_id}</span>
+                  <span class="result-date">📅 ${dateStr}</span>
+                </div>
+                <div class="result-spot-desc">
+                  ${escapeHtml(item.spot_description || 'Cluster member tile.')}
+                </div>
+                <div class="result-spectral-chips">
+                  <span class="spec-chip ndvi">NDVI ${ndviVal}</span>
+                  <span class="spec-chip ndwi">NDWI ${ndwiVal}</span>
+                  <span class="spec-chip ndbi">NDBI ${ndbiVal}</span>
+                </div>
+                <div class="result-card-actions">
+                  <button class="result-action-btn" onclick="openTileInspect('${item.tile_id}')">
+                    🔍 Inspect
+                  </button>
+                  <button class="result-action-btn" onclick="openTileInMap('${item.tile_id}', ${item.centroid_lat || 'null'}, ${item.centroid_lon || 'null'}, ${JSON.stringify(item.geometry_geojson || null).replace(/"/g, '&quot;')})">
+                    🗺️ Map
+                  </button>
+                  <button class="result-action-btn" onclick="discoverSimilarFromTile('${item.tile_id}')" style="color: #38bdf8; font-weight: 600;" title="Branch off into discovery from this tile">
+                    ⚡ Find Similar
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+      } catch (err) {
+        tilesGrid.innerHTML = `<div style="grid-column: 1 / -1; color: #f87171; text-align: center; padding: 20px;">Error loading member tiles: ${err.message}</div>`;
+      }
+    }
+
+    function closeClusterDrilldown() {
+      document.getElementById('clusterDrilldownSection').style.display = 'none';
+      document.querySelectorAll('.cluster-card').forEach(c => c.classList.remove('active'));
+      currentSelectedCluster = null;
+      document.getElementById('clustersOverviewSection').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    async function pinClusterOnMap(clusterId) {
+      try {
+        const res = await fetch(`/api/v1/clusters/${encodeURIComponent(clusterId)}/tiles?limit=80`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const tiles = await res.json();
+        openAllOnMap(tiles);
+      } catch (err) {
+        alert(`Failed to pin cluster: ${err.message}`);
+      }
+    }
+
+    function viewCurrentClusterOnMap() {
+      if (!currentClusterTiles || currentClusterTiles.length === 0) {
+        alert('No tiles loaded for this cluster.');
+        return;
+      }
+      openAllOnMap(currentClusterTiles);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadClustersWorkbench();
+    });
+  </script>
 </body>
 </html>

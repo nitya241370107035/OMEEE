@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
   
   <!-- App Stylesheet -->
-  <link rel="stylesheet" href="/frontend/index.css">
+  <link rel="stylesheet" href="/frontend/index.css?v=20260908_v6">
 
   <!-- Immediate Global Fallback for Thumbnail Errors -->
   <script>
@@ -97,6 +97,55 @@
     <div class="view-panel active" id="view-map">
       <div id="leafletMap"></div>
 
+      <!-- Prominent Fast-Travel & Coordinate Teleport Command Bar -->
+      <div class="map-fast-travel-bar">
+        <div class="fast-travel-header">
+          <div class="fast-travel-badge">🚀 COORDINATE TELEPORT & FAST TRAVEL</div>
+          <span class="fast-travel-hint" id="teleportFormatHintTop">Lat, Lon (e.g. 34.455, 73.315) or [minLat, minLon, maxLat, maxLon]</span>
+        </div>
+        <div class="fast-travel-input-row">
+          <div class="fast-travel-input-wrap">
+            <span class="fast-travel-icon">📍</span>
+            <input 
+              type="text" 
+              id="teleportCoordInputTop" 
+              placeholder="Enter coordinates (e.g. 34.455, 73.315 or 28°36'50&quot;N, 77°12'32&quot;E)..." 
+              class="fast-travel-input"
+              onkeydown="if(event.key === 'Enter') executeFastTravel()"
+            />
+          </div>
+          <button class="map-btn primary fast-travel-btn" onclick="executeFastTravel()">
+            <span>⚡ Teleport</span>
+          </button>
+          <select id="teleportPresetSelectTop" class="fast-travel-preset-select" onchange="teleportToPreset(this.value)">
+            <option value="">⚡ Strategic Bases...</option>
+            <optgroup label="🇺🇸 United States">
+              <option value="36.9450,-76.3250,15,Naval Station Norfolk (VA)">Naval Station Norfolk (VA)</option>
+              <option value="32.7000,-117.1800,15,San Diego Naval Base (CA)">San Diego Harbor (CA)</option>
+              <option value="28.5721,-80.6480,14,Kennedy Space Center (FL)">Kennedy Space Center (FL)</option>
+            </optgroup>
+            <optgroup label="🇮🇳 India">
+              <option value="18.9200,72.8400,15,Mumbai Port & Naval Dockyard">Mumbai Western Naval Command</option>
+              <option value="17.6800,83.2800,15,Visakhapatnam Harbor">Visakhapatnam Eastern Naval Command</option>
+              <option value="9.9650,76.2750,15,Kochi Naval Base">Kochi Southern Naval Command</option>
+            </optgroup>
+            <optgroup label="🇵🇰 Pakistan">
+              <option value="34.4550,73.3150,15,Balakot Training Complex">Balakot JEM Training Complex</option>
+              <option value="24.8400,66.9700,15,Karachi Naval Dockyard">Karachi Naval Dockyard & Base</option>
+              <option value="25.1200,62.3200,14,Gwadar Deep Water Port">Gwadar Deep Sea Port</option>
+            </optgroup>
+            <optgroup label="🇨🇳 China">
+              <option value="36.0800,120.3200,14,Qingdao Port Area (Shandong)">Qingdao PLA North Sea Fleet</option>
+              <option value="18.2200,109.5800,14,Yulin Submarine Base (Hainan)">Yulin Submarine Base (Hainan)</option>
+              <option value="29.9800,122.2000,14,Zhoushan Shipyard (Zhejiang)">Zhoushan Naval Base (Zhejiang)</option>
+            </optgroup>
+            <optgroup label="🇦🇪 Middle East">
+              <option value="25.1124,55.1390,14,Dubai Palm Jumeirah">Dubai Palm Jumeirah</option>
+            </optgroup>
+          </select>
+        </div>
+      </div>
+
       <!-- Floating Map Toolbar -->
       <div class="map-overlay-controls">
         <div class="map-control-card">
@@ -123,6 +172,62 @@
             </div>
           </div>
 
+          <!-- Coordinate Teleport & Go-To System -->
+          <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.08);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <h4 style="margin: 0; display: flex; align-items: center; gap: 5px;">
+                <span>🚀</span> COORDINATE TELEPORT
+              </h4>
+              <span style="font-size: 10px; color: var(--accent-cyan); font-family: monospace;" id="teleportFormatHint">Lat, Lon</span>
+            </div>
+
+            <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+              <input 
+                type="text" 
+                id="teleportCoordInput" 
+                placeholder="e.g. 34.455, 73.315 or [minLon,minLat,maxLon,maxLat]" 
+                class="teleport-input"
+                onkeydown="if(event.key === 'Enter') executeTeleport()"
+              />
+              <button class="map-btn primary" onclick="executeTeleport()" style="white-space: nowrap; padding: 6px 14px; font-weight: 600;">
+                Fly 🚀
+              </button>
+            </div>
+
+            <!-- Quick Teleport Strategic Presets Dropdown -->
+            <div>
+              <select id="teleportPresetSelect" class="region-select" onchange="teleportToPreset(this.value)" style="font-size: 11px; padding: 7px 10px;">
+                <option value="">⚡ Strategic Location Presets...</option>
+                <optgroup label="🇺🇸 United States">
+                  <option value="36.9450,-76.3250,15,Norfolk Naval Station (VA)">Naval Station Norfolk (VA)</option>
+                  <option value="32.7000,-117.1800,15,San Diego Harbor (CA)">San Diego Harbor / Coronado (CA)</option>
+                  <option value="28.5721,-80.6480,14,Kennedy Space Center (FL)">Kennedy Space Center (FL)</option>
+                </optgroup>
+                <optgroup label="🇨🇳 China">
+                  <option value="36.0800,120.3200,14,Qingdao Port (Shandong)">Qingdao Port Area (Shandong)</option>
+                  <option value="29.9800,122.2000,14,Zhoushan Shipyard (Zhejiang)">Zhoushan Shipyard (Zhejiang)</option>
+                  <option value="18.2200,109.5800,14,Yulin Harbor (Hainan)">Yulin Naval Base (Hainan)</option>
+                </optgroup>
+                <optgroup label="🇮🇳 India">
+                  <option value="18.9200,72.8400,15,Mumbai Port & Naval Dockyard">Mumbai Port & Naval Dockyard</option>
+                  <option value="17.6800,83.2800,15,Visakhapatnam Harbor">Visakhapatnam Harbor</option>
+                  <option value="9.9650,76.2750,15,Kochi Naval Base">Kochi Port & Naval Base</option>
+                  <option value="15.3800,73.8300,15,Goa Naval Base (INS Hansa)">Goa INS Hansa Air Station</option>
+                </optgroup>
+                <optgroup label="🇵🇰 Pakistan & Regional">
+                  <option value="34.4550,73.3150,15,Balakot / Jaba Hilltop">Balakot / Jaba Hilltop</option>
+                  <option value="24.8600,66.9800,14,Karachi Port">Karachi Port Area</option>
+                  <option value="25.1200,62.3300,14,Gwadar Port">Gwadar Deep Water Port</option>
+                </optgroup>
+                <optgroup label="🌐 Global Strategic">
+                  <option value="25.2048,55.2708,14,Dubai Coast & Port">Dubai Coast & Port (UAE)</option>
+                  <option value="1.2600,103.8000,14,Singapore Strait">Singapore Strait Maritime Hub</option>
+                  <option value="29.9300,32.5500,14,Suez Canal Entrance">Suez Canal Entrance (Egypt)</option>
+                </optgroup>
+              </select>
+            </div>
+          </div>
+
           <!-- Map Legend -->
           <div class="map-legend-wrap">
             <div class="map-legend-pill">
@@ -135,6 +240,13 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- Live Mouse Coordinates HUD -->
+      <div id="mouseCoordsHud" class="mouse-coords-hud">
+        <span class="hud-coord-item">📍 <span id="hudLatLon">Lat: --.----° | Lon: --.----°</span></span>
+        <span class="hud-coord-sep">|</span>
+        <span class="hud-coord-item">🔍 Zoom: <span id="hudZoom">5</span></span>
       </div>
     </div>
 
@@ -685,6 +797,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
   
   <!-- App JS -->
-  <script src="/frontend/app.js?v=20240906_maxar_v5"></script>
+  <script src="/frontend/app.js?v=20260908_v6"></script>
 </body>
 </html>

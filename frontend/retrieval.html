@@ -10,12 +10,68 @@
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   
   <!-- App Stylesheet -->
-  <link rel="stylesheet" href="/frontend/index.css">
+  <link rel="stylesheet" href="/frontend/index.css?v=20260908_v4">
   <style>
     .nav-item.active {
       background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(99, 102, 241, 0.25));
       border-color: var(--border-active);
       color: #38bdf8;
+    }
+
+    /* Discovery Modal Overlay & Content */
+    .discovery-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 7, 14, 0.88);
+      backdrop-filter: blur(18px);
+      z-index: 3000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      animation: fadeIn 0.25s ease;
+    }
+    .discovery-modal-content {
+      background: #0d121f;
+      border: 1px solid var(--border-active, rgba(6, 182, 212, 0.5));
+      border-radius: 14px;
+      width: 100%;
+      max-width: 1100px;
+      max-height: 88vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 40px rgba(6, 182, 212, 0.25);
+      overflow: hidden;
+    }
+    .discovery-modal-header {
+      padding: 16px 24px;
+      background: rgba(19, 27, 46, 0.9);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .discovery-modal-body {
+      padding: 22px;
+      overflow-y: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .discovery-seed-box {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      background: rgba(6, 182, 212, 0.08);
+      border: 1px solid rgba(6, 182, 212, 0.35);
+      border-radius: 10px;
+      padding: 14px 18px;
+    }
+    .discovery-results-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
     }
   </style>
 
@@ -261,6 +317,9 @@
             <button class="map-btn primary" id="inspectOpenMapBtn" onclick="inspectOpenInMapClicked()">
               🗺️ Open in Map View
             </button>
+            <button class="map-btn" id="inspectFindSimilarBtn" onclick="inspectFindSimilarClicked()" style="background: linear-gradient(135deg, rgba(6,182,212,0.25), rgba(99,102,241,0.25)); border-color: var(--accent-cyan); color: #38bdf8; font-weight: 600;">
+              🔍 Find Similar Sites (Discovery)
+            </button>
             <a id="inspectDownloadTifBtn" href="#" download class="map-btn" style="text-decoration: none; text-align: center;">
               💾 Download GeoTIFF (.tif)
             </a>
@@ -340,6 +399,6 @@
   <!-- Leaflet JS & Shared App JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-  <script src="/frontend/app.js?v=20240903_3"></script>
+  <script src="/frontend/app.js?v=20260908_v6"></script>
 </body>
 </html>

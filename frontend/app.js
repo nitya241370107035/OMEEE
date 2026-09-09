@@ -16,6 +16,7 @@ let map = null;
 let currentBasemap = null;
 let basemapLayers = {};
 let coverageLayerGroup = null;
+let discoveryMapLayerGroup = null;
 let drawControl = null;
 let currentDrawLayer = null;
 let coverageData = null;
@@ -87,9 +88,261 @@ function initMap() {
   // Setup Leaflet Draw Handler
   setupLeafletDraw();
 
+  // Setup Live Mouse Coordinates HUD
+  setupMouseCoordsHud();
+
   // Load Database Ingestion Coverage Polygons
   loadCoverageRegions();
 }
+
+// ============================================================
+// 2.5 COORDINATE TELEPORT & MOUSE HUD SYSTEM
+// ============================================================
+let activeTeleportMarker = null;
+let activeTeleportBox = null;
+
+function setupMouseCoordsHud() {
+  if (!map) return;
+  const hudLatLon = document.getElementById('hudLatLon');
+  const hudZoom = document.getElementById('hudZoom');
+
+  map.on('mousemove', function(e) {
+    if (hudLatLon) {
+      hudLatLon.innerText = `Lat: ${e.latlng.lat.toFixed(4)}° | Lon: ${e.latlng.lng.toFixed(4)}°`;
+    }
+  });
+
+  map.on('zoomend', function() {
+    if (hudZoom) {
+      hudZoom.innerText = map.getZoom();
+    }
+  });
+}
+
+window.parseCoordinateInput = function(raw) {
+  if (!raw) return null;
+  const clean = raw.trim();
+
+  // Check if JSON or bracket array e.g. [minLon, minLat, maxLon, maxLat]
+  if (clean.startsWith('[') && clean.endsWith(']')) {
+    try {
+      const arr = JSON.parse(clean);
+      if (Array.isArray(arr) && arr.length === 4) {
+        return { type: 'bbox', bbox: arr.map(Number) };
+      }
+      if (Array.isArray(arr) && arr.length === 2) {
+        return { type: 'point', lat: Number(arr[0]), lon: Number(arr[1]) };
+      }
+    } catch (e) {}
+  }
+
+  // Comma or space separated numbers
+  const nums = clean.replace(/[^\d.\-+,]/g, ' ')
+                    .split(/[\s,]+/)
+                    .filter(Boolean)
+                    .map(Number);
+
+  if (nums.length === 4) {
+    // BBOX: [minLon, minLat, maxLon, maxLat]
+    return { type: 'bbox', bbox: nums };
+  }
+
+  if (nums.length >= 2) {
+    let lat = nums[0];
+    let lon = nums[1];
+
+    // Smart detection: if first coordinate is > 90 or < -90, it's [lon, lat], swap them
+    if ((lat > 90 || lat < -90) && (lon >= -90 && lon <= 90)) {
+      const temp = lat;
+      lat = lon;
+      lon = temp;
+    }
+
+    return { type: 'point', lat, lon };
+  }
+
+  return null;
+};
+
+window.executeTeleport = function() {
+  const topInput = document.getElementById('teleportCoordInputTop');
+  const sideInput = document.getElementById('teleportCoordInput');
+  const val = (topInput && topInput.value.trim()) || (sideInput && sideInput.value.trim());
+
+  if (!val) {
+    alert('Please enter coordinates (e.g. 34.455, 73.315 or [minLat, minLon, maxLat, maxLon])');
+    return;
+  }
+
+  if (topInput) topInput.value = val;
+  if (sideInput) sideInput.value = val;
+
+  const parsed = parseCoordinateInput(val);
+  if (!parsed) {
+    alert('Invalid coordinate format.\n\nSupported examples:\n• "28.6139, 77.2090" (Lat, Lon)\n• "34.455 73.315"\n• "28°36\'50\\"N, 77°12\'32\\"E" (DMS)\n• "77.10, 28.50, 77.30, 28.70" (BBox)');
+    return;
+  }
+
+  if (parsed.type === 'point') {
+    teleportToPoint(parsed.lat, parsed.lon, 15, `Target Point: ${parsed.lat.toFixed(4)}°, ${parsed.lon.toFixed(4)}°`);
+  } else if (parsed.type === 'bbox') {
+    teleportToBbox(parsed.bbox);
+  }
+};
+
+window.executeFastTravel = window.executeTeleport;
+
+window.teleportToPreset = function(presetStr) {
+  if (!presetStr) return;
+  const parts = presetStr.split(',');
+  if (parts.length < 3) return;
+
+  const lat = parseFloat(parts[0]);
+  const lon = parseFloat(parts[1]);
+  const zoom = parseInt(parts[2], 10) || 15;
+  const label = parts.slice(3).join(',') || `Preset (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+
+  const coordText = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+  const topInput = document.getElementById('teleportCoordInputTop');
+  const sideInput = document.getElementById('teleportCoordInput');
+  if (topInput) topInput.value = coordText;
+  if (sideInput) sideInput.value = coordText;
+
+  const topSelect = document.getElementById('teleportPresetSelectTop');
+  const sideSelect = document.getElementById('teleportPresetSelect');
+  if (topSelect) topSelect.value = presetStr;
+  if (sideSelect) sideSelect.value = presetStr;
+
+  teleportToPoint(lat, lon, zoom, label);
+};
+
+window.teleportToPoint = function(lat, lon, zoom = 15, label = '') {
+  if (!map) return;
+
+  // Fly animation
+  map.flyTo([lat, lon], zoom, {
+    animate: true,
+    duration: 1.8
+  });
+
+  // Remove previous teleport marker & box
+  if (activeTeleportMarker) map.removeLayer(activeTeleportMarker);
+  if (activeTeleportBox) map.removeLayer(activeTeleportBox);
+
+  // Custom pulsing beacon icon
+  const pulseIcon = L.divIcon({
+    className: 'teleport-pulse-icon',
+    html: '<div class="teleport-pulse-dot"></div><div class="teleport-pulse-ring"></div>',
+    iconSize: [24, 24],
+    iconAnchor: [12, 12]
+  });
+
+  activeTeleportMarker = L.marker([lat, lon], { icon: pulseIcon }).addTo(map);
+
+  const popupContent = `
+    <div style="font-family: 'Inter', sans-serif; font-size: 12px; color: #fff; min-width: 200px; padding: 4px;">
+      <div style="font-weight: 700; color: #38bdf8; margin-bottom: 4px; font-size: 13px;">🚀 ${label || 'Target Location'}</div>
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #94a3b8; margin-bottom: 10px;">
+        Lat: ${lat.toFixed(5)}°<br>Lon: ${lon.toFixed(5)}°
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <button onclick="prepareIngestFromPoint(${lat}, ${lon})" style="background: #06b6d4; color: #000; border: none; padding: 6px 10px; border-radius: 4px; font-weight: 600; cursor: pointer; font-size: 11px;">
+          📥 Ingest This Location (5km AOI)
+        </button>
+        <button onclick="clearTeleportMarker()" style="background: rgba(255,255,255,0.1); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px;">
+          ❌ Clear Marker
+        </button>
+      </div>
+    </div>
+  `;
+
+  activeTeleportMarker.bindPopup(popupContent).openPopup();
+};
+
+window.teleportToBbox = function(bbox) {
+  if (!map || !bbox || bbox.length !== 4) return;
+  const [minLon, minLat, maxLon, maxLat] = bbox;
+
+  // Fly to BBOX bounds
+  map.flyToBounds([[minLat, minLon], [maxLat, maxLon]], {
+    animate: true,
+    duration: 1.8,
+    padding: [40, 40]
+  });
+
+  if (activeTeleportMarker) map.removeLayer(activeTeleportMarker);
+  if (activeTeleportBox) map.removeLayer(activeTeleportBox);
+
+  // Draw highlight polygon for the BBOX
+  activeTeleportBox = L.rectangle([[minLat, minLon], [maxLat, maxLon]], {
+    color: '#06b6d4',
+    weight: 2,
+    dashArray: '6, 6',
+    fillColor: '#06b6d4',
+    fillOpacity: 0.15
+  }).addTo(map);
+
+  activeTeleportBox.bindPopup(`
+    <div style="font-family: 'Inter', sans-serif; font-size: 12px; color: #fff; min-width: 220px; padding: 4px;">
+      <div style="font-weight: 700; color: #38bdf8; margin-bottom: 4px;">📦 Target Bounding Box</div>
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #94a3b8; margin-bottom: 8px;">
+        SW: ${minLat.toFixed(4)}°, ${minLon.toFixed(4)}°<br>
+        NE: ${maxLat.toFixed(4)}°, ${maxLon.toFixed(4)}°
+      </div>
+      <button onclick="prepareIngestFromBbox(${minLon}, ${minLat}, ${maxLon}, ${maxLat})" style="background: #06b6d4; color: #000; border: none; padding: 6px 10px; border-radius: 4px; font-weight: 600; cursor: pointer; font-size: 11px; width: 100%;">
+        📥 Ingest This Bounding Box
+      </button>
+    </div>
+  `).openPopup();
+};
+
+window.clearTeleportMarker = function() {
+  if (activeTeleportMarker && map) {
+    map.removeLayer(activeTeleportMarker);
+    activeTeleportMarker = null;
+  }
+  if (activeTeleportBox && map) {
+    map.removeLayer(activeTeleportBox);
+    activeTeleportBox = null;
+  }
+};
+
+window.prepareIngestFromPoint = function(lat, lon) {
+  // Generate ~5km x 5km box around point (approx 0.045 deg)
+  const d = 0.0225;
+  prepareIngestFromBbox(lon - d, lat - d, lon + d, lat + d);
+};
+
+window.prepareIngestFromBbox = function(minLon, minLat, maxLon, maxLat) {
+  const geojsonPoly = {
+    type: "Polygon",
+    coordinates: [[
+      [minLon, minLat],
+      [maxLon, minLat],
+      [maxLon, maxLat],
+      [minLon, maxLat],
+      [minLon, minLat]
+    ]]
+  };
+
+  const geoInput = document.getElementById('aoiGeoJson');
+  if (geoInput) {
+    geoInput.value = JSON.stringify(geojsonPoly, null, 2);
+  }
+
+  const centerLat = (minLat + maxLat) / 2;
+  const centerLon = (minLon + maxLon) / 2;
+  const regionIdInput = document.getElementById('aoiRegionId');
+  const regionNameInput = document.getElementById('aoiRegionName');
+  if (regionIdInput) {
+    regionIdInput.value = `sector_${centerLat.toFixed(2)}_${centerLon.toFixed(2)}`;
+  }
+  if (regionNameInput) {
+    regionNameInput.value = `Sector (${centerLat.toFixed(2)}°N, ${centerLon.toFixed(2)}°E)`;
+  }
+
+  openIngestModal();
+};
 
 window.switchBasemap = function(type) {
   if (!basemapLayers[type] || !map) return;
@@ -121,7 +374,7 @@ window.loadCoverageRegions = async function() {
     // Populate Region Dropdown
     const select = document.getElementById('regionSelect');
     if (select) {
-      select.innerHTML = '<option value="all">🌐 All Ingested Sectors</option>';
+      select.innerHTML = '<option value="all">ð All Ingested Sectors</option>';
     }
 
     // Update Header Tile Counter
@@ -145,7 +398,7 @@ window.loadCoverageRegions = async function() {
       if (select) {
         const opt = document.createElement('option');
         opt.value = props.region_id;
-        opt.innerText = `📍 ${props.region_name} (${props.tile_count} Tiles)`;
+        opt.innerText = `ð ${props.region_name} (${props.tile_count} Tiles)`;
         select.appendChild(opt);
       }
 
@@ -169,7 +422,7 @@ window.loadCoverageRegions = async function() {
 
       // Click Popup
       geoLayer.bindPopup(`
-        <div class="popup-title">🛰️ ${props.region_name}</div>
+        <div class="popup-title">ð°ï¸ ${props.region_name}</div>
         <div class="popup-stat"><strong>Region ID:</strong> ${props.region_id}</div>
         <div class="popup-stat"><strong>Embedded Tiles:</strong> ${props.tile_count}</div>
         <div class="popup-stat"><strong>Database Status:</strong> <span style="color: #34d399; font-weight: 600;">${props.status.toUpperCase()}</span></div>
@@ -239,7 +492,7 @@ function setupLeafletDraw() {
       regionIdInput.value = `region_${center.lat.toFixed(2)}_${center.lng.toFixed(2)}`;
     }
     if (regionNameInput && !regionNameInput.value) {
-      regionNameInput.value = `Sector (${center.lat.toFixed(2)}°N, ${center.lng.toFixed(2)}°E)`;
+      regionNameInput.value = `Sector (${center.lat.toFixed(2)}Â°N, ${center.lng.toFixed(2)}Â°E)`;
     }
 
     // Open Ingest Modal for Confirmation
@@ -298,7 +551,7 @@ window.setIngestionSensor = function(sensor) {
     if (maxarGroup) maxarGroup.style.display = 'block';
     if (bucketGroup) bucketGroup.style.display = 'none';
     if (descEl) {
-      descEl.innerHTML = `<strong>Maxar High-Resolution Optical Ingestion:</strong> Fetches sub-meter orthorectified imagery from the Maxar/Esri Wayback archive (2020–2026), slices 512×512 georeferenced GeoTIFFs, computes the VARI index, and stores embeddings in dedicated Qdrant collection <code>maxar_tile_embeddings</code>.`;
+      descEl.innerHTML = `<strong>Maxar High-Resolution Optical Ingestion:</strong> Fetches sub-meter orthorectified imagery from the Maxar/Esri Wayback archive (2020â2026), slices 512Ã512 georeferenced GeoTIFFs, computes the VARI index, and stores embeddings in dedicated Qdrant collection <code>maxar_tile_embeddings</code>.`;
     }
     setMaxarEpochPreset('2020_2026');
   } else {
@@ -314,7 +567,7 @@ window.setIngestionSensor = function(sensor) {
     if (maxarGroup) maxarGroup.style.display = 'none';
     if (bucketGroup) bucketGroup.style.display = 'block';
     if (descEl) {
-      descEl.innerHTML = `Define an AOI polygon and choose the historical timeline (e.g. 1–10 years). The pipeline fetches all covering Sentinel-2 scenes, cleans cloud/shadow masks, normalizes, slices 512x512 tiles, computes indices (NDVI/NDWI/NDBI), and embeds into Qdrant & PostgreSQL.`;
+      descEl.innerHTML = `Define an AOI polygon and choose the historical timeline (e.g. 1â10 years). The pipeline fetches all covering Sentinel-2 scenes, cleans cloud/shadow masks, normalizes, slices 512x512 tiles, computes indices (NDVI/NDWI/NDBI), and embeds into Qdrant & PostgreSQL.`;
     }
     setTimelineYears(2);
   }
@@ -363,7 +616,7 @@ window.handleGeoTiffFilesSelected = function(files) {
   if (summaryEl) {
     summaryEl.style.display = 'block';
     const names = selectedGeoTiffFiles.map(f => f.name).join(', ');
-    summaryEl.innerHTML = `✅ <strong>${selectedGeoTiffFiles.length} file(s) selected:</strong> ${names}`;
+    summaryEl.innerHTML = `â <strong>${selectedGeoTiffFiles.length} file(s) selected:</strong> ${names}`;
   }
 };
 
@@ -431,8 +684,8 @@ function animateProgressBar() {
 
   const isMaxar = currentIngestionSensor === 'maxar';
   label.innerText = isMaxar 
-    ? '🔍 1/4: Connecting to Maxar Wayback Archive & Selecting Epochs...' 
-    : '⚡ 1/5: Querying STAC Catalog & Selecting Granules...';
+    ? 'ð 1/4: Connecting to Maxar Wayback Archive & Selecting Epochs...' 
+    : 'â¡ 1/5: Querying STAC Catalog & Selecting Granules...';
   subtext.innerText = isMaxar
     ? 'Selecting 2020 baseline and contemporary sub-meter orthorectified releases...'
     : 'Scanning AWS Earth Search STAC for cloud-free Sentinel-2 scenes...';
@@ -441,15 +694,15 @@ function animateProgressBar() {
   timer.innerText = '0s';
 
   const steps = isMaxar ? [
-    { pct: 25, label: '🛰️ 2/4: Streaming High-Res Maxar WMTS Tiles & Stitching...', sub: 'Fetching sub-meter orthorectified image canvas across epochs...' },
-    { pct: 50, label: '✂️ 3/4: Slicing 512×512 Georeferenced Tiles & Computing VARI...', sub: 'Generating EPSG:4326 GeoTIFFs with Visible Atmospherically Resistant Index...' },
-    { pct: 75, label: '🧠 4/4: RemoteCLIP ViT-B-32 Vector Embeddings & Indexing...', sub: 'Embedding optical features into Qdrant maxar_tile_embeddings & PostgreSQL...' },
-    { pct: 90, label: '💾 Finalizing Database Registration & Map Coverage...', sub: 'Writing georeferenced sector polygons to PostgreSQL...' }
+    { pct: 25, label: 'ð°ï¸ 2/4: Streaming High-Res Maxar WMTS Tiles & Stitching...', sub: 'Fetching sub-meter orthorectified image canvas across epochs...' },
+    { pct: 50, label: 'âï¸ 3/4: Slicing 512Ã512 Georeferenced Tiles & Computing VARI...', sub: 'Generating EPSG:4326 GeoTIFFs with Visible Atmospherically Resistant Index...' },
+    { pct: 75, label: 'ð§  4/4: RemoteCLIP ViT-B-32 Vector Embeddings & Indexing...', sub: 'Embedding optical features into Qdrant maxar_tile_embeddings & PostgreSQL...' },
+    { pct: 90, label: 'ð¾ Finalizing Database Registration & Map Coverage...', sub: 'Writing georeferenced sector polygons to PostgreSQL...' }
   ] : [
-    { pct: 25, label: '🛰️ 2/5: Streaming Cloud-Optimized GeoTIFFs (B2, B3, B4, B8, B11)...', sub: 'Reprojecting rasters to EPSG:4326 working canvas...' },
-    { pct: 50, label: '☁️ 3/5: Computing Cloud & Shadow Masks + 2-98% Normalization...', sub: 'Filtering bad pixels and scaling dynamic range across 5 bands...' },
-    { pct: 70, label: '✂️ 4/5: Slicing 512x512 Tiles & Calculating NDVI, NDWI, NDBI...', sub: 'Computing multi-spectral vegetation, water, and built-up indices...' },
-    { pct: 90, label: '🧠 5/5: Generating RemoteCLIP ViT-B-32 Vector Embeddings...', sub: 'Batch upserting 512-dim vectors into Qdrant and metadata into PostgreSQL...' }
+    { pct: 25, label: 'ð°ï¸ 2/5: Streaming Cloud-Optimized GeoTIFFs (B2, B3, B4, B8, B11)...', sub: 'Reprojecting rasters to EPSG:4326 working canvas...' },
+    { pct: 50, label: 'âï¸ 3/5: Computing Cloud & Shadow Masks + 2-98% Normalization...', sub: 'Filtering bad pixels and scaling dynamic range across 5 bands...' },
+    { pct: 70, label: 'âï¸ 4/5: Slicing 512x512 Tiles & Calculating NDVI, NDWI, NDBI...', sub: 'Computing multi-spectral vegetation, water, and built-up indices...' },
+    { pct: 90, label: 'ð§  5/5: Generating RemoteCLIP ViT-B-32 Vector Embeddings...', sub: 'Batch upserting 512-dim vectors into Qdrant and metadata into PostgreSQL...' }
   ];
 
   let stepIdx = 0;
@@ -477,12 +730,12 @@ function stopProgressBar(success, message) {
 
   if (success) {
     bar.style.width = '100%';
-    label.innerText = '✅ Ingestion Pipeline Complete!';
+    label.innerText = 'â Ingestion Pipeline Complete!';
     label.style.color = '#34d399';
     alertBox.style.display = 'block';
     alertBox.innerHTML = `<strong>SUCCESS:</strong> ${message}`;
   } else {
-    label.innerText = '❌ Ingestion Failed';
+    label.innerText = 'â Ingestion Failed';
     label.style.color = '#f43f5e';
     alertBox.style.display = 'block';
     alertBox.style.background = 'rgba(244, 63, 94, 0.15)';
@@ -535,7 +788,7 @@ window.startIngestion = async function() {
 
         console.log("[AeroLens] Submitting Maxar async job:", maxarPayload);
 
-        // Step 1: Submit � returns job_id INSTANTLY (no timeout risk)
+        // Step 1: Submit  returns job_id INSTANTLY (no timeout risk)
         const submitRes = await fetch(`${API_BASE}/api/v1/ingest/maxar`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -560,7 +813,7 @@ window.startIngestion = async function() {
         const progressStages = [
           { minPct: 0,  label: '??? 1/4: Connecting to Maxar Wayback Archive...', sub: 'Resolving release IDs for selected epochs...' },
           { minPct: 10, label: '??? 2/4: Streaming WMTS Tiles & Stitching Canvas...', sub: 'Downloading sub-meter optical imagery from Esri Wayback...' },
-          { minPct: 30, label: '?? 3/4: Slicing 512�512 GeoTIFF Tiles...', sub: 'Polygon intersection & VARI index computation...' },
+          { minPct: 30, label: '?? 3/4: Slicing 512×512 GeoTIFF Tiles...', sub: 'Polygon intersection & VARI index computation...' },
           { minPct: 60, label: '?? 4/4: RemoteCLIP Embeddings ? Qdrant & PostgreSQL...', sub: 'Indexing tile vectors into maxar_tile_embeddings...' },
         ];
 
@@ -753,7 +1006,7 @@ window.startIngestion = async function() {
 };
 
 // ============================================================
-// 8. PHASE 2.7 — SEMANTIC RETRIEVAL CHAT & TILE INSPECTOR
+// 8. PHASE 2.7 â SEMANTIC RETRIEVAL CHAT & TILE INSPECTOR
 // ============================================================
 
 let attachedSearchFile = null;
@@ -787,7 +1040,7 @@ window.onSearchImageSelected = function(event) {
   const preview = document.getElementById('searchImageAttachmentPreview');
   const nameLabel = document.getElementById('attachedImageName');
   if (preview && nameLabel) {
-    nameLabel.innerText = `📷 ${file.name}`;
+    nameLabel.innerText = `ð· ${file.name}`;
     preview.style.display = 'inline-flex';
   }
 };
@@ -926,7 +1179,7 @@ function renderUserChatMessage(text, file) {
   }
 
   msg.innerHTML = `
-    <div class="chat-avatar">👤</div>
+    <div class="chat-avatar">ð¤</div>
     <div class="chat-bubble">
       ${contentHtml}
     </div>
@@ -940,7 +1193,7 @@ function renderAssistantLoadingBubble(id) {
   msg.className = 'chat-message assistant';
   msg.id = id;
   msg.innerHTML = `
-    <div class="chat-avatar">🛰️</div>
+    <div class="chat-avatar">ð°ï¸</div>
     <div class="chat-bubble">
       <div style="display: flex; align-items: center; gap: 10px; color: var(--accent-cyan); font-size: 13px;">
         <span class="status-dot"></span>
@@ -956,7 +1209,7 @@ function renderAssistantErrorBubble(errMsg) {
   const msg = document.createElement('div');
   msg.className = 'chat-message assistant';
   msg.innerHTML = `
-    <div class="chat-avatar">⚠️</div>
+    <div class="chat-avatar">â ï¸</div>
     <div class="chat-bubble" style="border-color: rgba(244, 63, 94, 0.4); background: rgba(244, 63, 94, 0.1);">
       <div style="color: var(--accent-rose); font-weight: 600; font-size: 13px; margin-bottom: 4px;">Search Failed</div>
       <div style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(errMsg)}</div>
@@ -975,13 +1228,13 @@ function renderAssistantResultsBubble(response) {
   let headerHtml = `
     <div class="chat-bubble-header">
       <span class="assistant-name">Search Results (${response.total_found} Matches)</span>
-      <span class="assistant-meta">⚡ ${response.execution_time_ms} ms &bull; Cosine Similarity</span>
+      <span class="assistant-meta">â¡ ${response.execution_time_ms} ms &bull; Cosine Similarity</span>
     </div>
   `;
 
   if (response.total_found === 0) {
     msg.innerHTML = `
-      <div class="chat-avatar">🛰️</div>
+      <div class="chat-avatar">ð°ï¸</div>
       <div class="chat-bubble">
         ${headerHtml}
         <div class="chat-text" style="color: var(--text-secondary);">
@@ -1013,7 +1266,7 @@ function renderAssistantResultsBubble(response) {
         <div class="result-body">
           <div class="result-title-row">
             <span class="result-tile-id">#${idx + 1} &bull; ${item.tile_id}</span>
-            <span class="result-date">📅 ${dateStr}</span>
+            <span class="result-date">ð ${dateStr}</span>
           </div>
 
           <!-- Spot Description (Phase 2.4) -->
@@ -1036,6 +1289,9 @@ function renderAssistantResultsBubble(response) {
             <button class="result-action-btn" onclick="openTileInMap('${item.tile_id}', ${item.centroid_lat || 'null'}, ${item.centroid_lon || 'null'}, ${JSON.stringify(item.geometry_geojson || null).replace(/"/g, '&quot;')})">
               🗺️ Open in Map
             </button>
+            <button class="result-action-btn" onclick="discoverSimilarFromTile('${item.tile_id}')" style="color: #38bdf8; font-weight: 600;" title="Discover similar sites across the entire archive">
+              ⚡ Find Similar
+            </button>
           </div>
         </div>
       </div>
@@ -1044,7 +1300,7 @@ function renderAssistantResultsBubble(response) {
   gridHtml += `</div>`;
 
   msg.innerHTML = `
-    <div class="chat-avatar">🛰️</div>
+    <div class="chat-avatar">ð°ï¸</div>
     <div class="chat-bubble" style="width: 100%;">
       ${headerHtml}
       ${gridHtml}
@@ -1056,7 +1312,11 @@ function renderAssistantResultsBubble(response) {
 // Fallback image generator for missing/mock tile previews
 window.getTileThumbnailUrl = function(item) {
   if (item.thumbnail_url && !item.thumbnail_url.includes('/null/')) {
-    return item.thumbnail_url.startsWith('http') ? item.thumbnail_url : `${API_BASE}${item.thumbnail_url}`;
+    let t = item.thumbnail_url.trim();
+    if (t.startsWith('//')) t = t.replace(/^\/+/, '/');
+    if (t.startsWith('/app/')) t = t.replace('/app/', '/');
+    else if (t.startsWith('app/')) t = t.replace('app/', '/');
+    return t.startsWith('http') ? t : `${API_BASE}${t.startsWith('/') ? '' : '/'}${t}`;
   }
   if (item.site_key && item.site_key !== 'null') {
     return `${API_BASE}/data/tiles/${item.site_key}/${item.tile_id}_preview.jpg`;
@@ -1087,7 +1347,7 @@ function createTileSvgDataUri(tileId) {
     <circle cx="256" cy="256" r="140" fill="none" stroke="rgba(6,182,212,0.25)" stroke-width="2" stroke-dasharray="6,6"/>
     <line x1="256" y1="80" x2="256" y2="432" stroke="rgba(6,182,212,0.3)" stroke-width="1.5"/>
     <line x1="80" y1="256" x2="432" y2="256" stroke="rgba(6,182,212,0.3)" stroke-width="1.5"/>
-    <text x="256" y="240" font-family="monospace" font-size="28" fill="#38bdf8" text-anchor="middle" font-weight="bold">🛰️ SENTINEL-2</text>
+    <text x="256" y="240" font-family="monospace" font-size="28" fill="#38bdf8" text-anchor="middle" font-weight="bold">ð°ï¸ SENTINEL-2</text>
     <text x="256" y="275" font-family="monospace" font-size="14" fill="#94a3b8" text-anchor="middle">512x512 MULTI-SPECTRAL</text>
     <text x="256" y="300" font-family="monospace" font-size="12" fill="#06b6d4" text-anchor="middle">${cleanId}</text>
   </svg>`;
@@ -1143,7 +1403,7 @@ window.openTileInspect = function(tileId) {
   document.getElementById('inspectMetaSceneId').innerText = item.scene_id || 'N/A';
   document.getElementById('inspectMetaDate').innerText = item.acquisition_date || 'N/A';
   document.getElementById('inspectMetaCoords').innerText = (item.centroid_lat && item.centroid_lon) 
-    ? `${item.centroid_lat.toFixed(4)}° N, ${item.centroid_lon.toFixed(4)}° E` 
+    ? `${item.centroid_lat.toFixed(4)}Â° N, ${item.centroid_lon.toFixed(4)}Â° E` 
     : 'N/A';
   document.getElementById('inspectMetaCloud').innerText = `${item.cloud_pct !== null && item.cloud_pct !== undefined ? item.cloud_pct.toFixed(1) : '0.0'}%`;
   document.getElementById('inspectMetaQuality').innerText = `${item.quality_confidence !== null && item.quality_confidence !== undefined ? item.quality_confidence.toFixed(2) : '1.00'} (Gated)`;
@@ -1162,6 +1422,386 @@ window.inspectOpenInMapClicked = function() {
   const item = currentInspectingTile;
   closeTileInspect();
   openTileInMap(item.tile_id, item.centroid_lat, item.centroid_lon, item.geometry_geojson);
+};
+
+window.inspectFindSimilarClicked = function() {
+  if (!currentInspectingTile) return;
+  const tileId = currentInspectingTile.tile_id;
+  closeTileInspect();
+  discoverSimilarFromTile(tileId);
+};
+
+// ============================================================
+// 9.5 GENERIC SIMILARITY DISCOVERY (PS 2.2.4)
+// ============================================================
+window.__lastDiscoveredTiles = [];
+
+window.discoverSimilarFromTile = async function(tileId) {
+  if (!tileId) return;
+
+  const chatFeed = document.getElementById('chatFeed');
+  if (chatFeed) {
+    // 1. Post user prompt in chat
+    const userMsg = document.createElement('div');
+    userMsg.className = 'chat-message user';
+    userMsg.innerHTML = `
+      <div class="chat-bubble">
+        ⚡ Find visually and semantically similar sites like <code>${tileId}</code> across the entire archive
+      </div>
+    `;
+    chatFeed.appendChild(userMsg);
+
+    // 2. Post loading placeholder
+    const loadingMsg = document.createElement('div');
+    loadingMsg.className = 'chat-message assistant';
+    loadingMsg.id = 'discoveryLoadingIndicator';
+    loadingMsg.innerHTML = `
+      <div class="chat-avatar">🛰️</div>
+      <div class="chat-bubble" style="display: flex; align-items: center; gap: 10px;">
+        <div class="status-dot"></div>
+        <span>Searching Qdrant multi-region vector space for twins of <strong>${tileId}</strong> (zero re-encoding)...</span>
+      </div>
+    `;
+    chatFeed.appendChild(loadingMsg);
+    chatFeed.scrollTop = chatFeed.scrollHeight;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/discover/${encodeURIComponent(tileId)}?top_k=10`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Discovery HTTP error ${res.status}`);
+    }
+
+    const results = await res.json();
+    window.__lastDiscoveredTiles = results;
+
+    // Cache currentSearchResults so inspect modal finds them
+    results.forEach(r => {
+      if (!currentSearchResults.some(t => t.tile_id === r.tile_id)) {
+        currentSearchResults.push(r);
+      }
+    });
+
+    // Remove loading indicator
+    const loader = document.getElementById('discoveryLoadingIndicator');
+    if (loader) loader.remove();
+
+    // ALWAYS open the rich interactive pop-up window showing the top 5 similar tiles
+    showDiscoveryResultsModal(tileId, results.slice(0, 5));
+
+    if (!chatFeed) {
+      return;
+    }
+
+    // Render Discovery Response in Chat (as history)
+    const msg = document.createElement('div');
+    msg.className = 'chat-message assistant';
+
+    const headerHtml = `
+      <div class="retrieval-summary-header" style="background: linear-gradient(135deg, rgba(6,182,212,0.15), rgba(99,102,241,0.15)); border: 1px solid var(--border-active); border-radius: var(--radius-md); padding: 14px; margin-bottom: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 16px;">⚡</span>
+              <h4 style="font-size: 14px; font-weight: 700; color: #38bdf8; margin: 0;">Discovery: Similar Sites Found</h4>
+              <span class="tag-badge" style="background: rgba(6,182,212,0.2); color: var(--accent-cyan);">PS 2.2.4</span>
+            </div>
+            <p style="font-size: 12px; color: var(--text-secondary); margin: 4px 0 0 0;">
+              Seed: <code>${tileId}</code> &bull; <strong>${results.length} matches</strong> across multiple geographic sectors (Zero Re-Encoding)
+            </p>
+          </div>
+          <button class="map-btn primary" onclick="openAllOnMap(window.__lastDiscoveredTiles)" style="padding: 8px 16px; font-weight: 700; background: #06b6d4; color: #000;">
+            🗺️ See All Locations on Map
+          </button>
+        </div>
+      </div>
+    `;
+
+    let gridHtml = `<div class="retrieval-results-grid">`;
+    results.forEach((item, idx) => {
+      const scorePct = (item.score * 100).toFixed(1);
+      const thumbUrl = getTileThumbnailUrl(item);
+      const dateStr = item.acquisition_date ? item.acquisition_date.split('T')[0] : 'Unknown Date';
+
+      const ndviVal = item.mean_ndvi !== null && item.mean_ndvi !== undefined ? item.mean_ndvi.toFixed(2) : '-';
+      const ndwiVal = item.mean_ndwi !== null && item.mean_ndwi !== undefined ? item.mean_ndwi.toFixed(2) : '-';
+      const ndbiVal = item.mean_ndbi !== null && item.mean_ndbi !== undefined ? item.mean_ndbi.toFixed(2) : '-';
+
+      gridHtml += `
+        <div class="result-card" style="border-color: rgba(6,182,212,0.3);">
+          <div class="result-thumb-wrap">
+            <img class="result-thumb-img" src="${thumbUrl}" alt="${item.tile_id}" onerror="handleTileThumbError(this, '${item.tile_id}')">
+            <div class="result-score-badge" style="background: rgba(6,182,212,0.9);">${scorePct}% Match</div>
+          </div>
+          <div class="result-body">
+            <div class="result-title-row">
+              <span class="result-tile-id">#${idx + 1} &bull; ${item.tile_id}</span>
+              <span class="result-date">📅 ${dateStr}</span>
+            </div>
+            <div class="result-spot-desc">
+              ${escapeHtml(item.spot_description || 'Visually & semantically similar terrain signature.')}
+            </div>
+            <div class="result-spectral-chips">
+              <span class="spec-chip ndvi">NDVI ${ndviVal}</span>
+              <span class="spec-chip ndwi">NDWI ${ndwiVal}</span>
+              <span class="spec-chip ndbi">NDBI ${ndbiVal}</span>
+            </div>
+            <div class="result-card-actions">
+              <button class="result-action-btn" onclick="openTileInspect('${item.tile_id}')">
+                🔍 Inspect
+              </button>
+              <button class="result-action-btn" onclick="openTileInMap('${item.tile_id}', ${item.centroid_lat || 'null'}, ${item.centroid_lon || 'null'}, ${JSON.stringify(item.geometry_geojson || null).replace(/"/g, '&quot;')})">
+                🗺️ Map
+              </button>
+              <button class="result-action-btn" onclick="discoverSimilarFromTile('${item.tile_id}')" style="color: #38bdf8; font-weight: 600;" title="Recursive discovery from this match">
+                ⚡ Find Similar
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+    gridHtml += `</div>`;
+
+    msg.innerHTML = `
+      <div class="chat-avatar">🛰️</div>
+      <div class="chat-bubble" style="width: 100%;">
+        ${headerHtml}
+        ${gridHtml}
+      </div>
+    `;
+
+    chatFeed.appendChild(msg);
+    chatFeed.scrollTop = chatFeed.scrollHeight;
+
+  } catch (err) {
+    const loader = document.getElementById('discoveryLoadingIndicator');
+    if (loader) loader.remove();
+
+    if (chatFeed) {
+      const errMsg = document.createElement('div');
+      errMsg.className = 'chat-message assistant';
+      errMsg.innerHTML = `
+        <div class="chat-avatar">⚠️</div>
+        <div class="chat-bubble" style="color: #f87171;">
+          Discovery Error: ${escapeHtml(err.message)}
+        </div>
+      `;
+      chatFeed.appendChild(errMsg);
+    } else {
+      alert(`Discovery Error: ${err.message}`);
+    }
+  }
+};
+
+window.showDiscoveryResultsModal = function(seedTileId, results) {
+  let modal = document.getElementById('discoveryModalOverlay');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'discoveryModalOverlay';
+    modal.className = 'discovery-modal-overlay';
+    document.body.appendChild(modal);
+  }
+
+  const top5 = (results || []).slice(0, 5);
+
+  const resultCardsHtml = top5.map((item, idx) => {
+    const hasScore = item.score !== undefined && item.score !== null;
+    const scorePct = hasScore ? (item.score * 100).toFixed(1) + '% Match' : 'Cluster Member';
+    const thumbUrl = getTileThumbnailUrl(item);
+    const dateStr = item.acquisition_date ? item.acquisition_date.split('T')[0] : 'Unknown Date';
+    const ndviVal = item.mean_ndvi !== null && item.mean_ndvi !== undefined ? item.mean_ndvi.toFixed(2) : '-';
+    const ndwiVal = item.mean_ndwi !== null && item.mean_ndwi !== undefined ? item.mean_ndwi.toFixed(2) : '-';
+    const ndbiVal = item.mean_ndbi !== null && item.mean_ndbi !== undefined ? item.mean_ndbi.toFixed(2) : '-';
+    const lat = item.centroid_lat ? item.centroid_lat.toFixed(4) : null;
+    const lon = item.centroid_lon ? item.centroid_lon.toFixed(4) : null;
+
+    return `
+      <div class="result-card" style="border-color: rgba(6,182,212,0.35); background: rgba(13, 18, 31, 0.95); display: flex; flex-direction: column; min-width: 0;">
+        <div class="result-thumb-wrap" style="height: 160px; position: relative;">
+          <img class="result-thumb-img" src="${thumbUrl}" alt="${item.tile_id}" onerror="handleTileThumbError(this, '${item.tile_id}')">
+          <div class="result-score-badge" style="background: rgba(6,182,212,0.95); color: #000; font-weight: 800;">${scorePct}</div>
+          <div style="position: absolute; bottom: 8px; left: 8px; font-size: 10px; font-family: 'JetBrains Mono', monospace; background: rgba(0,0,0,0.75); padding: 2px 6px; border-radius: 4px; color: #38bdf8;">
+            ${lat ? lat + '° N, ' + lon + '° E' : 'WGS84 Coordinates'}
+          </div>
+        </div>
+        <div class="result-body" style="display: flex; flex-direction: column; flex: 1; padding: 14px;">
+          <div class="result-title-row">
+            <span class="result-tile-id" style="font-size: 12px; font-weight: 700;" title="${item.tile_id}">#${idx + 1} &bull; ${item.tile_id.length > 22 ? item.tile_id.slice(0, 20) + '...' : item.tile_id}</span>
+            <span class="result-date">📅 ${dateStr}</span>
+          </div>
+          <div class="result-spot-desc" style="font-size: 11px; margin: 6px 0; color: var(--text-secondary); line-height: 1.4;">
+            ${escapeHtml(item.spot_description || 'High-dimensional visual & semantic twin.')}
+          </div>
+          <div class="result-spectral-chips" style="margin-bottom: 10px;">
+            <span class="spec-chip ndvi">NDVI ${ndviVal}</span>
+            <span class="spec-chip ndwi">NDWI ${ndwiVal}</span>
+            <span class="spec-chip ndbi">NDBI ${ndbiVal}</span>
+          </div>
+          <div class="result-card-actions" style="margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <button class="map-btn primary" onclick="openTileInMap('${item.tile_id}', ${item.centroid_lat || 'null'}, ${item.centroid_lon || 'null'}, ${JSON.stringify(item.geometry_geojson || null).replace(/"/g, '&quot;')})" style="padding: 7px 8px; font-size: 11px; font-weight: 700; background: linear-gradient(135deg, #06b6d4, #6366f1); color: #fff;">
+              🗺️ See on Map
+            </button>
+            <button class="map-btn" onclick="openTileInspect('${item.tile_id}')" style="padding: 7px 8px; font-size: 11px; font-weight: 600;">
+              🔍 Inspect Tile
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  modal.innerHTML = `
+    <div class="discovery-modal-content">
+      <div class="discovery-modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div style="width: 34px; height: 34px; border-radius: 8px; background: rgba(6,182,212,0.2); border: 1px solid var(--accent-cyan); display: flex; align-items: center; justify-content: center; font-size: 18px;">
+            ⚡
+          </div>
+          <div>
+            <h3 style="font-size: 16px; font-weight: 800; color: #fff; margin: 0;">Top 5 Discovered Similar Sites</h3>
+            <span style="font-size: 12px; color: var(--text-muted);">Unsupervised High-Dimensional Similarity Search (PS 2.2.4 &bull; Zero GPU Re-Encoding)</span>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <button class="map-btn primary" onclick="openAllOnMap(window.__lastDiscoveredTiles)" style="padding: 8px 16px; font-weight: 700; background: #06b6d4; color: #000;">
+            🗺️ See All ${top5.length} on Map
+          </button>
+          <button class="modal-close-btn" onclick="closeDiscoveryModal()">&times;</button>
+        </div>
+      </div>
+      <div class="discovery-modal-body">
+        <div class="discovery-seed-box">
+          <span style="font-size: 22px;">🎯</span>
+          <div>
+            <div style="font-size: 13px; font-weight: 700; color: #38bdf8;">Seed Tile: <code>${escapeHtml(seedTileId)}</code></div>
+            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">
+              Directly queried 512-dim RemoteCLIP embedding in Qdrant &bull; Identified top ${top5.length} visual and terrain signature twins across archive sectors.
+            </div>
+          </div>
+        </div>
+        <div class="discovery-results-grid">
+          ${resultCardsHtml}
+        </div>
+      </div>
+    </div>
+  `;
+
+  modal.style.display = 'flex';
+};
+
+window.closeDiscoveryModal = function() {
+  const modal = document.getElementById('discoveryModalOverlay');
+  if (modal) modal.style.display = 'none';
+};
+
+window.openAllOnMap = function(tiles) {
+  if (!tiles || tiles.length === 0) {
+    alert('No tiles available to plot on map.');
+    return;
+  }
+
+  // Store discovery pins for map handoff
+  localStorage.setItem('discovery_pins', JSON.stringify(tiles));
+
+  // If on map page already:
+  if (document.getElementById('leafletMap')) {
+    renderDiscoveryPinsOnMap(tiles);
+    return;
+  }
+
+  // Navigate to map view
+  window.location.href = `/?discovery=true`;
+};
+
+window.renderDiscoveryPinsOnMap = function(tiles) {
+  if (!map) {
+    // Retry if map is still initializing
+    setTimeout(() => window.renderDiscoveryPinsOnMap(tiles), 300);
+    return;
+  }
+  if (!tiles || tiles.length === 0) return;
+
+  if (discoveryMapLayerGroup) {
+    try { map.removeLayer(discoveryMapLayerGroup); } catch (e) {}
+  }
+  discoveryMapLayerGroup = L.featureGroup().addTo(map);
+
+  const bounds = L.latLngBounds();
+  let validCount = 0;
+
+  tiles.forEach((item, idx) => {
+    const lat = parseFloat(item.centroid_lat);
+    const lon = parseFloat(item.centroid_lon);
+    if (isNaN(lat) || isNaN(lon)) return;
+
+    validCount++;
+    bounds.extend([lat, lon]);
+
+    const hasScore = item.score !== undefined && item.score !== null;
+    const scoreVal = hasScore ? (item.score * 100).toFixed(0) + '%' : 'Member';
+    const scoreDisplay = hasScore ? (item.score * 100).toFixed(1) + '%' : 'Cluster Medoid / Member';
+
+    const markerIcon = L.divIcon({
+      className: 'discovery-map-pin',
+      html: `
+        <div style="position: relative; cursor: pointer; text-align: center;">
+          <div style="background: linear-gradient(135deg, #06b6d4, #6366f1); color: #fff; font-weight: 700; font-size: 11px; padding: 3px 8px; border-radius: 12px; border: 1px solid #fff; box-shadow: 0 0 14px rgba(6,182,212,0.85); white-space: nowrap;">
+            #${idx + 1} (${scoreVal})
+          </div>
+          <div style="width: 2px; height: 10px; background: #06b6d4; margin: 0 auto;"></div>
+        </div>
+      `,
+      iconSize: [80, 32],
+      iconAnchor: [40, 32]
+    });
+
+    const marker = L.marker([lat, lon], { icon: markerIcon }).addTo(discoveryMapLayerGroup);
+    const thumbUrl = getTileThumbnailUrl(item);
+
+    marker.bindPopup(`
+      <div style="font-family: 'Inter', sans-serif; font-size: 12px; color: #fff; width: 240px; padding: 4px;">
+        <div style="font-weight: 700; color: #38bdf8; margin-bottom: 4px;">🎯 Match #${idx + 1} &bull; ${scoreVal}</div>
+        <img src="${thumbUrl}" style="width: 100%; height: 120px; object-fit: cover; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 6px;" onerror="handleTileThumbError(this, '${item.tile_id}')">
+        <div style="font-size: 11px; color: #cbd5e1; margin-bottom: 8px;">
+          <strong>Tile:</strong> <code>${item.tile_id}</code><br>
+          <strong>Match:</strong> ${scoreDisplay}<br>
+          <strong>Centroid:</strong> ${lat.toFixed(4)}° N, ${lon.toFixed(4)}° E
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+          <button onclick="openTileInspect('${item.tile_id}')" style="background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 5px 8px; border-radius: 4px; font-weight: 600; cursor: pointer; font-size: 11px;">
+            🔍 Inspect
+          </button>
+          <button onclick="discoverSimilarFromTile('${item.tile_id}')" style="background: #06b6d4; color: #000; border: none; padding: 5px 8px; border-radius: 4px; font-weight: 700; cursor: pointer; font-size: 11px;">
+            ⚡ Find Similar
+          </button>
+        </div>
+      </div>
+    `);
+
+    // Draw footprint rectangle if available
+    if (item.geometry_geojson) {
+      try {
+        const geom = typeof item.geometry_geojson === 'string' ? JSON.parse(item.geometry_geojson) : item.geometry_geojson;
+        if (geom && (geom.coordinates || geom.type)) {
+          L.geoJSON(geom, {
+            style: {
+              color: '#06b6d4',
+              weight: 2,
+              fillColor: '#06b6d4',
+              fillOpacity: 0.15,
+              dashArray: '4, 4'
+            }
+          }).addTo(discoveryMapLayerGroup);
+        }
+      } catch (e) {}
+    }
+  });
+
+  if (validCount > 0 && bounds.isValid()) {
+    map.fitBounds(bounds, { padding: [80, 80], maxZoom: 15 });
+  }
 };
 
 window.openTileInMap = function(tileId, centroidLat, centroidLon, geometryGeoJson) {
@@ -1221,9 +1861,23 @@ window.openTileInMap = function(tileId, centroidLat, centroidLon, geometryGeoJso
 
 function checkUrlParamsForTileHighlight() {
   const params = new URLSearchParams(window.location.search);
+  const isDiscovery = params.get('discovery');
   const tileId = params.get('tile_id');
   const lat = parseFloat(params.get('lat'));
   const lon = parseFloat(params.get('lon'));
+
+  if (isDiscovery) {
+    try {
+      const cached = localStorage.getItem('discovery_pins');
+      if (cached) {
+        const tiles = JSON.parse(cached);
+        setTimeout(() => {
+          renderDiscoveryPinsOnMap(tiles);
+        }, 500);
+        return;
+      }
+    } catch (e) {}
+  }
 
   if (tileId && lat && lon && map) {
     setTimeout(() => {
