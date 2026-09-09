@@ -138,14 +138,24 @@ def clean_and_normalize_canvas(
         )
     else:
         band_map = {name.lower(): canvas_data.data[idx] for idx, name in enumerate(canvas_data.band_names)}
-        red = band_map.get("b04", band_map.get("red"))
-        green = band_map.get("b03", band_map.get("green"))
-        blue = band_map.get("b02", band_map.get("blue"))
+        red = band_map.get("b04", band_map.get("red", band_map.get("b4")))
+        green = band_map.get("b03", band_map.get("green", band_map.get("b3")))
+        blue = band_map.get("b02", band_map.get("blue", band_map.get("b2")))
 
         if red is None or green is None or blue is None:
-            raise ValueError(
-                f"Canvas is missing RGB bands (B04, B03, B02). Available: {canvas_data.band_names}"
-            )
+            # Flexible positional fallback for generic or unlabelled rasters
+            if canvas_data.data.shape[0] >= 3:
+                red = canvas_data.data[0]
+                green = canvas_data.data[1]
+                blue = canvas_data.data[2]
+            elif canvas_data.data.shape[0] == 1:
+                red = canvas_data.data[0]
+                green = canvas_data.data[0]
+                blue = canvas_data.data[0]
+            else:
+                raise ValueError(
+                    f"Canvas is missing RGB bands (B04, B03, B02). Available: {canvas_data.band_names}"
+                )
 
         rgb_stack = np.stack([red, green, blue], axis=0)
         rgb_normalized = normalize_rgb_percentile(

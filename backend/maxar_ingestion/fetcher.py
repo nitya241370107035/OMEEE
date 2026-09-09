@@ -30,48 +30,26 @@ WAYBACK_RELEASES: Dict[int, Dict[str, str]] = {
     2026: {"release_id": "26334", "date": "2026-08-05", "label": "August 2026 Contemporary"},
 }
 
-DEFAULT_ZOOM = 17  # Sub-meter / high-res optical imagery (~1.19m/px at equator; ~0.6m at zoom 18)
-
-# Safety cap: max WMTS tiles to download in one call (prevents OOM for city-scale AOIs)
-MAX_SAFE_WMTS_TILES = 800
+DEFAULT_ZOOM = 16  # ~2.38m/pixel at equator; sub-meter at zoom 17-18.
 
 
 def auto_select_zoom(bbox: Tuple[float, float, float, float], requested_zoom: Optional[int] = None) -> int:
     """
-    Automatically selects the best zoom level balancing high optical clarity and memory safety.
-    Ensures crisp sub-meter / near-meter Maxar imagery without blurry downscaling:
-
-      - Tactical / Base areas (<= ~5km / 0.05deg): zoom 18 (~0.6m/px high-res)
-      - City sectors / Ports (<= ~15km / 0.15deg):  zoom 17 (~1.2m/px crisp optical)
-      - Regional metropolitan (<= ~35km / 0.35deg): zoom 16 (~2.4m/px standard)
-      - Very large multi-city AOIs (> 0.35deg):      zoom 15 (~4.8m/px)
+    Automatically selects high-resolution zoom level for sub-meter coverage:
+      - Small tactical areas (<= ~2 km): zoom 18 (true sub-meter ~0.6m/px)
+      - Medium areas (<= ~6 km): zoom 17 (~1.2m/px)
+      - Large regional AOIs: zoom 16 (~2.4m/px)
     """
     if requested_zoom and requested_zoom > 0 and requested_zoom != DEFAULT_ZOOM:
-        candidate = max(15, min(18, requested_zoom))
-    else:
-        min_lon, min_lat, max_lon, max_lat = bbox
-        span = max(abs(max_lon - min_lon), abs(max_lat - min_lat))
-        if span <= 0.05:
-            candidate = 18
-        elif span <= 0.15:
-            candidate = 17
-        elif span <= 0.35:
-            candidate = 16
-        else:
-            candidate = 15
+        return max(14, min(18, requested_zoom))
 
-    # Safety check: ensure total WMTS tiles stays within memory limit
-    while candidate > 15:
-        x_min, y_max = deg2num(bbox[1], bbox[0], candidate)
-        x_max, y_min = deg2num(bbox[3], bbox[2], candidate)
-        total_tiles = (x_max - x_min + 1) * (y_max - y_min + 1)
-        if total_tiles <= MAX_SAFE_WMTS_TILES:
-            break
-        logger.info(f"Zoom {candidate} needs {total_tiles} WMTS tiles (>{MAX_SAFE_WMTS_TILES}), stepping down to zoom {candidate-1}")
-        candidate -= 1
-
-    logger.info(f"auto_select_zoom: bbox span={max(abs(bbox[2]-bbox[0]), abs(bbox[3]-bbox[1])):.3f}deg → zoom {candidate}")
-    return candidate
+    min_lon, min_lat, max_lon, max_lat = bbox
+    span = max(abs(max_lon - min_lon), abs(max_lat - min_lat))
+    if span <= 0.025:
+        return 18
+    elif span <= 0.07:
+        return 17
+    return DEFAULT_ZOOM
 
 
 def deg2num(lat_deg: float, lon_deg: float, zoom: int) -> Tuple[int, int]:

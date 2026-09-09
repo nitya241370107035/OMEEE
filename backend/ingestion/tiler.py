@@ -119,8 +119,8 @@ def compute_spectral_indices(
     red = band_map.get("red", band_map.get("b04", band_map.get("b4", tile_multiband[0].astype(np.float32) if tile_multiband.shape[0] >= 3 else None)))
     green = band_map.get("green", band_map.get("b03", band_map.get("b3", tile_multiband[1].astype(np.float32) if tile_multiband.shape[0] >= 3 else None)))
     blue = band_map.get("blue", band_map.get("b02", band_map.get("b2", tile_multiband[2].astype(np.float32) if tile_multiband.shape[0] >= 3 else None)))
-    nir = band_map.get("nir", band_map.get("b08", band_map.get("b8", tile_multiband[3].astype(np.float32) if tile_multiband.shape[0] >= 4 else None)))
-    swir = band_map.get("swir", band_map.get("b11", band_map.get("b6", band_map.get("b12", tile_multiband[4].astype(np.float32) if tile_multiband.shape[0] >= 5 else None))))
+    nir = band_map.get("nir", band_map.get("b08", band_map.get("b8", band_map.get("b5", tile_multiband[3].astype(np.float32) if tile_multiband.shape[0] >= 4 else None))))
+    swir = band_map.get("swir", band_map.get("b11", band_map.get("b6", band_map.get("b12", band_map.get("b7", tile_multiband[4].astype(np.float32) if tile_multiband.shape[0] >= 5 else None)))))
 
     mean_ndvi: Optional[float] = None
     mean_ndwi: Optional[float] = None

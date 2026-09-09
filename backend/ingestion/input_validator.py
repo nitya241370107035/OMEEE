@@ -286,9 +286,13 @@ def detect_sensor_from_filename_or_tags(
     if "_SR_B" in fn_upper or "_QA_PIXEL" in fn_upper or "LANDSAT" in fn_upper:
         return "landsat"
 
-    # Sentinel-2: S2A, S2B, or contains _B0
-    if any(fn_upper.startswith(prefix) for prefix in ("S2A", "S2B", "SENTINEL")):
+    # Sentinel-2: S2A, S2B, S2C, or contains SENTINEL
+    if any(fn_upper.startswith(prefix) for prefix in ("S2A", "S2B", "S2C", "SENTINEL")):
         return "sentinel2"
+
+    # PlanetScope / Commercial 4-band / High-Res
+    if any(p in fn_upper for p in ("PLANET", "PSB", "WORLDVIEW", "WV02", "WV03", "PLEIADES", "SPOT", "NAIP")):
+        return "commercial_highres"
 
     return "generic"
 
@@ -327,6 +331,8 @@ def infer_band_order(
                 d_clean = desc.strip()
                 d_lower = d_clean.lower()
                 d_upper = d_clean.upper()
+                import re
+                norm_tag = re.sub(r"^(?:BAND|SR_B|B)[_\s]*", "B", d_upper)
                 
                 # Direct spectral name matches
                 if "red" in d_lower and "edge" not in d_lower:
@@ -346,50 +352,50 @@ def infer_band_order(
                 elif sensor_lower == "landsat":
                     # USGS Landsat 8/9:
                     # B1=Coastal, B2=Blue, B3=Green, B4=Red, B5=NIR, B6=SWIR1, B7=SWIR2, B8=Pan, B10=TIRS
-                    if d_upper in ("B1", "B01"):
+                    if norm_tag in ("B1", "B01"):
                         inferred.append("coastal")
-                    elif d_upper in ("B2", "B02"):
+                    elif norm_tag in ("B2", "B02"):
                         inferred.append("blue")
-                    elif d_upper in ("B3", "B03"):
+                    elif norm_tag in ("B3", "B03"):
                         inferred.append("green")
-                    elif d_upper in ("B4", "B04"):
+                    elif norm_tag in ("B4", "B04"):
                         inferred.append("red")
-                    elif d_upper in ("B5", "B05"):
+                    elif norm_tag in ("B5", "B05"):
                         inferred.append("nir")  # <-- Landsat Band 5 is NIR!
-                    elif d_upper in ("B6", "B06"):
+                    elif norm_tag in ("B6", "B06"):
                         inferred.append("swir")
-                    elif d_upper in ("B7", "B07"):
+                    elif norm_tag in ("B7", "B07"):
                         inferred.append("swir2")
-                    elif d_upper in ("B8", "B08"):
+                    elif norm_tag in ("B8", "B08"):
                         inferred.append("panchromatic")
-                    elif d_upper in ("B10", "B11"):
+                    elif norm_tag in ("B10", "B11"):
                         inferred.append("thermal")
-                    elif "QA" in d_upper or "PIXEL" in d_upper:
+                    elif "QA" in norm_tag or "PIXEL" in norm_tag:
                         inferred.append("mask")
                     else:
                         inferred.append(d_clean)
                 
                 else:
                     # Sentinel-2 / Generic convention:
-                    if d_upper in ("B2", "B02"):
+                    if norm_tag in ("B2", "B02"):
                         inferred.append("blue")
-                    elif d_upper in ("B3", "B03"):
+                    elif norm_tag in ("B3", "B03"):
                         inferred.append("green")
-                    elif d_upper in ("B4", "B04"):
+                    elif norm_tag in ("B4", "B04"):
                         inferred.append("red")
-                    elif d_upper in ("B8", "B08"):
+                    elif norm_tag in ("B8", "B08"):
                         inferred.append("nir")
-                    elif d_upper in ("B11", "B12"):
+                    elif norm_tag in ("B11", "B12"):
                         inferred.append("swir")
-                    elif d_upper in ("B1", "B01"):
+                    elif norm_tag in ("B1", "B01"):
                         inferred.append("B01")
-                    elif d_upper in ("B5", "B05"):
+                    elif norm_tag in ("B5", "B05"):
                         inferred.append("B05")
-                    elif d_upper in ("B8A", "8A"):
+                    elif norm_tag in ("B8A", "8A"):
                         inferred.append("B8A")
-                    elif d_upper in ("B9", "B09"):
+                    elif norm_tag in ("B9", "B09"):
                         inferred.append("B09")
-                    elif d_upper in ("B10",):
+                    elif norm_tag in ("B10",):
                         inferred.append("B10")
                     else:
                         inferred.append(d_clean)
@@ -403,13 +409,32 @@ def infer_band_order(
     elif band_count == 3:
         return ["red", "green", "blue"]
     elif band_count == 4:
+        if sensor_lower == "landsat":
+            return ["blue", "green", "red", "nir"]
         return ["red", "green", "blue", "nir"]
     elif band_count == 5:
         if sensor_lower == "landsat":
             return ["blue", "green", "red", "nir", "swir"]
         return ["red", "green", "blue", "nir", "swir"]
+    elif band_count == 6:
+        # Standard 6-band surface reflectance (Landsat or Sentinel RGB+NIR+SWIR1+SWIR2)
+        return ["blue", "green", "red", "nir", "swir", "swir2"]
+    elif band_count == 7:
+        # Landsat 8/9 SR (Coastal, Blue, Green, Red, NIR, SWIR1, SWIR2)
+        if sensor_lower == "landsat":
+            return ["coastal", "blue", "green", "red", "nir", "swir", "swir2"]
+        return ["blue", "green", "red", "nir", "swir", "swir2", "mask"]
+    elif band_count == 8:
+        # Landsat 8/9 SR + QA
+        if sensor_lower == "landsat":
+            return ["coastal", "blue", "green", "red", "nir", "swir", "swir2", "qa"]
+        return ["blue", "green", "red", "nir", "swir", "swir2", "band_7", "band_8"]
     elif band_count == 10:
         return ["B01", "B02", "B04", "B05", "B08", "B8A", "B09", "B10", "B11", "B12"]
+    elif band_count == 12:
+        return ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B11", "B12"]
+    elif band_count == 13:
+        return ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B10", "B11", "B12"]
     else:
         return [f"band_{i}" for i in range(1, band_count + 1)]
 

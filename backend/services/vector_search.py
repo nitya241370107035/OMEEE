@@ -303,7 +303,7 @@ class VectorSearchService:
                             match=MatchAny(any=[
                                 "sentinel-2", "sentinel-2a", "sentinel-2b", "sentinel-2c", "sentinel-2d",
                                 "Sentinel-2", "Sentinel-2A", "Sentinel-2B", "Sentinel-2C", "Sentinel-2D",
-                                "Sentinel-2 L2A", "sentinel2", "sentinel"
+                                "Sentinel-2 L2A", "sentinel2", "sentinel", "Organiser Sensor"
                             ])
                         )
                     )
