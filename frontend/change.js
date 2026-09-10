@@ -103,6 +103,23 @@ function setupDrawerControls() {
     });
   }
 
+  // Studio Workbench Fullscreen / Side-Panel Toggle
+  const expandBtn = document.getElementById("btn-expand-drawer");
+  if (expandBtn && drawer) {
+    expandBtn.addEventListener("click", () => {
+      drawer.classList.toggle("side-mode");
+      const isSide = drawer.classList.contains("side-mode");
+      const icon = document.getElementById("expand-icon");
+      const text = document.getElementById("expand-text");
+      if (icon) icon.textContent = isSide ? "⤢" : "🗗";
+      if (text) text.textContent = isSide ? "Full Studio" : "Side Panel";
+      if (changeMap) changeMap.invalidateSize();
+    });
+  }
+
+  // Setup Lightbox Modal Controls
+  setupLightboxControls();
+
   // Date selection change listeners for the dual inspector
   const selectT1 = document.getElementById("select-t1-date");
   const selectT2 = document.getElementById("select-t2-date");
@@ -128,6 +145,32 @@ function setupDrawerControls() {
     selectInterval.addEventListener("change", (e) => switchChangeViewMode(e.target.value));
   }
 }
+
+function setupLightboxControls() {
+  const modal = document.getElementById("change-lightbox-modal");
+  const closeBtn = document.getElementById("lightbox-close-btn");
+  if (modal && closeBtn) {
+    closeBtn.addEventListener("click", () => {
+      modal.style.display = "none";
+    });
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) modal.style.display = "none";
+    });
+  }
+}
+
+window.openLightbox = function(url, title = "Band Map Inspection") {
+  if (!url) return;
+  const modal = document.getElementById("change-lightbox-modal");
+  const img = document.getElementById("lightbox-img");
+  const titleEl = document.getElementById("lightbox-title");
+  if (modal && img) {
+    img.src = url;
+    if (titleEl) titleEl.textContent = title;
+    modal.style.display = "flex";
+  }
+};
+
 
 async function loadChangeGrid() {
   const hudStatus = document.getElementById("hud-status-text");
@@ -275,9 +318,12 @@ async function openMultiTemporalDrawer(siteKey) {
   const transitionsContainer = document.getElementById("sequential-transitions-container");
   const bridgeEpochCount = document.getElementById("bridge-epoch-count");
 
-  if (!drawer) return;
-
   drawer.classList.add("open");
+  drawer.classList.remove("side-mode");
+  const icon = document.getElementById("expand-icon");
+  const text = document.getElementById("expand-text");
+  if (icon) icon.textContent = "🗗";
+  if (text) text.textContent = "Side Panel";
   if (siteKeyEl) siteKeyEl.textContent = siteKey;
   if (siteTitleEl) siteTitleEl.textContent = "Loading Multi-Temporal Series...";
   if (stackContainer) stackContainer.innerHTML = '<span style="color:#64748b; font-size:11px; padding:10px;">Loading epoch stack...</span>';
@@ -615,6 +661,14 @@ async function checkAndLoadExistingAnalysis(siteKey) {
     if (res.ok) {
       const data = await res.json();
       if (data && data.overall && data.overall.total_regions > 0) {
+        // If cached analysis is missing band maps or cursor grids, re-run sequence once so user sees full maps
+        const p0 = data.pairwise && data.pairwise[0];
+        if (!p0 || !p0.ndvi_before_url || !p0.binary_mask_url) {
+          console.log("Cached analysis is missing multi-band maps. Auto-running sequence...");
+          runMultiTemporalSequenceAnalysis();
+          return;
+        }
+
         currentSiteAnalysis = data;
         if (statusBadge) {
           statusBadge.textContent = "Cached (PostgreSQL)";
@@ -623,6 +677,16 @@ async function checkAndLoadExistingAnalysis(siteKey) {
         }
         renderAnalysisUI(data);
         renderChangeVectorLayer(data.overall.change_geojson, "Overall Aggregated");
+
+        // Ensure workbench is full studio mode
+        const drawer = document.getElementById("temporal-drawer");
+        if (drawer) {
+          drawer.classList.remove("side-mode");
+          const icon = document.getElementById("expand-icon");
+          const text = document.getElementById("expand-text");
+          if (icon) icon.textContent = "🗗";
+          if (text) text.textContent = "Side Panel";
+        }
         return;
       }
     }
@@ -919,87 +983,349 @@ function renderYearwiseMaskGallery(pairwise) {
     const pFeatures = pair.change_geojson?.features || [];
     const changePct = pair.change_pct != null ? `${pair.change_pct}%` : "--%";
 
+    // Verification stats
+    const candPx = pair.candidate_pixels ?? (pair.filter_stats?.candidate_changes || 0);
+    const fpRejected = pair.false_positives_rejected ?? (pair.filter_stats?.false_positives_rejected || 0);
+    const verifiedPx = pair.changed_pixels ?? (pair.filter_stats?.verified_changes || 0);
+    const rejRate = candPx > 0 ? ((fpRejected / candPx) * 100).toFixed(1) : "0.0";
+
     // Spectral shift deltas
     const dNdvi = pair.spectral_profile?.delta?.ndvi != null ? (pair.spectral_profile.delta.ndvi >= 0 ? "+" : "") + pair.spectral_profile.delta.ndvi.toFixed(2) : "--";
     const dNdbi = pair.spectral_profile?.delta?.ndbi != null ? (pair.spectral_profile.delta.ndbi >= 0 ? "+" : "") + pair.spectral_profile.delta.ndbi.toFixed(2) : "--";
+    const dNdwi = pair.spectral_profile?.delta?.ndwi != null ? (pair.spectral_profile.delta.ndwi >= 0 ? "+" : "") + pair.spectral_profile.delta.ndwi.toFixed(2) : "--";
 
-    // Find thumbnails from currentSiteTimeline if available
+    // Image URLs (fallback to timeline thumbnails if necessary)
     const snapB = currentSiteTimeline?.snapshots?.find(s => s.tile_id === pair.tile_before_id || s.date === pair.date_before);
     const snapA = currentSiteTimeline?.snapshots?.find(s => s.tile_id === pair.tile_after_id || s.date === pair.date_after);
-    const thumbB = snapB?.thumbnail_url || "";
-    const thumbA = snapA?.thumbnail_url || "";
-
+    const rgbB = pair.rgb_before_url || snapB?.thumbnail_url || "";
+    const rgbA = pair.rgb_after_url || snapA?.thumbnail_url || "";
+    const ndviB = pair.ndvi_before_url || "";
+    const ndviA = pair.ndvi_after_url || "";
     const rawMaskUrl = pair.binary_mask_url || "";
     const filteredMaskUrl = pair.filtered_mask_url || "";
 
+    // Total area
+    let pairAreaM2 = 0;
+    pFeatures.forEach(f => pairAreaM2 += (f.properties?.area_sq_m || f.properties?.area_m2 || 0));
+    const pairAreaStr = pairAreaM2 >= 10000 ? `${(pairAreaM2 / 10000).toFixed(2)} ha` : `${Math.round(pairAreaM2).toLocaleString()} m²`;
+
     card.innerHTML = `
       <div class="mask-pair-header">
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span class="transition-label-badge">Pair ${idx + 1}</span>
-          <span style="font-size:11px; font-family:'JetBrains Mono',monospace; color:#f8fafc; font-weight:700;">
-            ${pair.date_before} → ${pair.date_after}
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span class="transition-label-badge" style="font-size:11px; padding:4px 8px;">Pair ${idx + 1}</span>
+          <span style="font-size:13px; font-family:'JetBrains Mono',monospace; color:#f8fafc; font-weight:700;">
+            ${pair.date_before} &rarr; ${pair.date_after}
           </span>
         </div>
-        <div style="display:flex; align-items:center; gap:6px;">
-          <span class="metric-pill" style="color:#f59e0b; font-weight:800;" title="Surface changed">${changePct}</span>
-          <span class="metric-pill" style="color:#38bdf8;" title="Surviving polygons">${pFeatures.length} polys</span>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button class="hud-btn btn-theater-toggle" style="padding:4px 10px; font-size:11px; background:rgba(6,182,212,0.15); border:1px solid rgba(6,182,212,0.4); color:#38bdf8;" title="Maximize this pair to full screen theater mode">
+            ⤢ Fullscreen Pair
+          </button>
+          <span class="metric-pill" style="color:#f59e0b; font-weight:800; font-size:11px;" title="Surface changed">${changePct} Changed</span>
+          <span class="metric-pill" style="color:#38bdf8; font-size:11px;" title="Surviving polygons">${pFeatures.length} polys (${pairAreaStr})</span>
         </div>
       </div>
 
-      <!-- Quad Image Grid (Before RGB, After RGB, Raw Binary Mask, Filtered Mask) -->
-      <div class="mask-quad-grid">
-        <div class="mask-box">
-          <div class="mask-img-wrap" title="Before RGB (${pair.date_before})">
-            <img src="${thumbB}" alt="Before RGB" />
+      <!-- Live Cursor Spectral HUD Bar -->
+      <div class="pair-cursor-hud" id="cursor-hud-${idx}">
+        <div class="hud-cursor-lead">
+          <span class="pulse-dot"></span>
+          <span>LIVE CURSOR PIXEL INSPECTOR:</span>
+          <span class="hud-coords" id="coords-${idx}">Move cursor over any band map below to inspect pixel values</span>
+        </div>
+        <div class="hud-spectral-readouts" id="readouts-${idx}">
+          <div class="readout-group before">
+            <span class="readout-tag">Before (${pair.date_before})</span>
+            <span class="readout-item">NDVI: <b id="val-ndvi-b-${idx}" style="color:#34d399;">--</b></span>
+            <span class="readout-item">NDWI: <b id="val-ndwi-b-${idx}" style="color:#38bdf8;">--</b></span>
+            <span class="readout-item">NDBI: <b id="val-ndbi-b-${idx}" style="color:#fbbf24;">--</b></span>
+            <span class="readout-class" id="class-b-${idx}">--</span>
           </div>
-          <span class="mask-box-label">Before RGB</span>
+          <div class="readout-arrow" style="color:#64748b; font-size:16px;">&rarr;</div>
+          <div class="readout-group after">
+            <span class="readout-tag">After (${pair.date_after})</span>
+            <span class="readout-item">NDVI: <b id="val-ndvi-a-${idx}" style="color:#34d399;">--</b></span>
+            <span class="readout-item">NDWI: <b id="val-ndwi-a-${idx}" style="color:#38bdf8;">--</b></span>
+            <span class="readout-item">NDBI: <b id="val-ndbi-a-${idx}" style="color:#fbbf24;">--</b></span>
+            <span class="readout-class" id="class-a-${idx}">--</span>
+          </div>
+          <div class="readout-transition" id="trans-${idx}">Hover over map</div>
+        </div>
+      </div>
+
+      <!-- 6-Panel Multi-Band Matrix -->
+      <div class="mask-hex-grid">
+        <!-- 1. Before RGB -->
+        <div class="mask-box" onclick="openLightbox('${rgbB}', 'Before RGB (${pair.date_before})')">
+          <span class="mask-box-badge rgb">T1 RGB</span>
+          <div class="mask-img-wrap" title="Click to enlarge Before RGB (${pair.date_before})">
+            ${rgbB ? `<img src="${rgbB}" alt="Before RGB" loading="eager" />` : `<span style="font-size:10px; color:#94a3b8;">No RGB</span>`}
+            <div class="sync-crosshair"></div>
+          </div>
+          <span class="mask-box-label">Before RGB (${pair.date_before})</span>
         </div>
 
-        <div class="mask-box">
-          <div class="mask-img-wrap" title="After RGB (${pair.date_after})">
-            <img src="${thumbA}" alt="After RGB" />
+        <!-- 2. After RGB -->
+        <div class="mask-box" onclick="openLightbox('${rgbA}', 'After RGB (${pair.date_after})')">
+          <span class="mask-box-badge rgb">T2 RGB</span>
+          <div class="mask-img-wrap" title="Click to enlarge After RGB (${pair.date_after})">
+            ${rgbA ? `<img src="${rgbA}" alt="After RGB" loading="eager" />` : `<span style="font-size:10px; color:#94a3b8;">No RGB</span>`}
+            <div class="sync-crosshair"></div>
           </div>
-          <span class="mask-box-label">After RGB</span>
+          <span class="mask-box-label">After RGB (${pair.date_after})</span>
         </div>
 
-        <div class="mask-box">
+        <!-- 3. Before NDVI Band Map -->
+        <div class="mask-box" onclick="openLightbox('${ndviB}', 'Before NDVI Band Map (${pair.date_before})')">
+          <span class="mask-box-badge ndvi">T1 NDVI</span>
+          <div class="mask-img-wrap" title="Click to enlarge Before NDVI Band Map (${pair.date_before})">
+            ${ndviB ? `<img src="${ndviB}" alt="Before NDVI" loading="eager" />` : `<span style="font-size:10px; color:#94a3b8;">NDVI Map</span>`}
+            <div class="sync-crosshair"></div>
+          </div>
+          <span class="mask-box-label" style="color:#6ee7b7;">Before NDVI (${pair.date_before})</span>
+        </div>
+
+        <!-- 4. After NDVI Band Map -->
+        <div class="mask-box" onclick="openLightbox('${ndviA}', 'After NDVI Band Map (${pair.date_after})')">
+          <span class="mask-box-badge ndvi">T2 NDVI</span>
+          <div class="mask-img-wrap" title="Click to enlarge After NDVI Band Map (${pair.date_after})">
+            ${ndviA ? `<img src="${ndviA}" alt="After NDVI" loading="eager" />` : `<span style="font-size:10px; color:#94a3b8;">NDVI Map</span>`}
+            <div class="sync-crosshair"></div>
+          </div>
+          <span class="mask-box-label" style="color:#6ee7b7;">After NDVI (${pair.date_after})</span>
+        </div>
+
+        <!-- 5. Raw ChangeFormer Binary Mask -->
+        <div class="mask-box" onclick="openLightbox('${rawMaskUrl}', 'Raw ChangeFormer Binary Prediction (0/1)')">
+          <span class="mask-box-badge binary">Neural Net</span>
           <div class="mask-img-wrap" style="border-color: rgba(6, 182, 212, 0.4);" title="Raw MTKD-ChangeFormer Binary Prediction (0/1)">
-            ${rawMaskUrl ? `<img src="${rawMaskUrl}" alt="ChangeFormer Mask" />` : `<span style="font-size:8px; color:#64748b; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;">Binary Mask</span>`}
+            ${rawMaskUrl ? `<img src="${rawMaskUrl}" alt="ChangeFormer Mask" loading="eager" />` : `<span style="font-size:10px; color:#94a3b8;">Binary Mask</span>`}
+            <div class="sync-crosshair"></div>
           </div>
-          <span class="mask-box-label" style="color:#38bdf8;">Binary Mask</span>
+          <span class="mask-box-label" style="color:#38bdf8;">Binary Mask (Where)</span>
         </div>
 
-        <div class="mask-box">
+        <!-- 6. Semantic-Verified Change Mask -->
+        <div class="mask-box" onclick="openLightbox('${filteredMaskUrl}', 'Semantic-Verified True Changes (Contradictions Removed)')">
+          <span class="mask-box-badge verified">Verified</span>
           <div class="mask-img-wrap" style="border-color: rgba(245, 158, 11, 0.4);" title="Semantically Verified Mask (Seasonal noise rejected)">
-            ${filteredMaskUrl ? `<img src="${filteredMaskUrl}" alt="Verified Mask" />` : `<span style="font-size:8px; color:#64748b; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;">Verified Mask</span>`}
+            ${filteredMaskUrl ? `<img src="${filteredMaskUrl}" alt="Verified Mask" loading="eager" />` : `<span style="font-size:10px; color:#94a3b8;">Verified Mask</span>`}
+            <div class="sync-crosshair"></div>
           </div>
-          <span class="mask-box-label" style="color:#f59e0b;">Verified Mask</span>
+          <span class="mask-box-label" style="color:#f59e0b;">Verified Mask (What)</span>
         </div>
       </div>
 
-      <!-- Quick Index Deltas & Isolate Button -->
-      <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#94a3b8; border-top:1px solid rgba(255,255,255,0.06); padding-top:6px;">
-        <div style="display:flex; gap:10px; font-family:'JetBrains Mono',monospace;">
-          <span>ΔNDVI: <b style="color:${parseFloat(dNdvi) < 0 ? '#f43f5e' : '#10b981'}">${dNdvi}</b></span>
-          <span>ΔNDBI: <b style="color:${parseFloat(dNdbi) > 0 ? '#f59e0b' : '#38bdf8'}">${dNdbi}</b></span>
+      <!-- Verification Audit & False-Positive Rejection Summary -->
+      <div class="filter-audit-bar">
+        <div class="filter-audit-stat" title="Raw changed pixels identified by binary ChangeFormer">
+          <span>⚡ Candidate Pixels:</span>
+          <b style="color:#38bdf8;">${candPx.toLocaleString()}</b>
         </div>
-        <button class="hud-btn" style="padding:3px 8px; font-size:10px;" title="Isolate this pair on map">
-          🔍 Focus Pair
-        </button>
+        <div class="filter-audit-stat" title="Pixels discarded because before/after bands showed no actual land-cover transition">
+          <span>🚫 False-Positives Discarded:</span>
+          <b style="color:#f43f5e;">${fpRejected.toLocaleString()} (${rejRate}%)</b>
+        </div>
+        <div class="filter-audit-stat" title="Verified true land-cover changes confirmed by spectral bands">
+          <span>🎯 Real Changes Kept:</span>
+          <b style="color:#10b981;">${verifiedPx.toLocaleString()}</b>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div style="display:flex; gap:8px; font-family:'JetBrains Mono',monospace; font-size:10px;">
+            <span title="NDVI Delta">ΔNDVI: <b style="color:${parseFloat(dNdvi) < 0 ? '#f43f5e' : '#10b981'}">${dNdvi}</b></span>
+            <span title="NDBI Delta">ΔNDBI: <b style="color:${parseFloat(dNdbi) > 0 ? '#f59e0b' : '#38bdf8'}">${dNdbi}</b></span>
+          </div>
+          <button class="hud-btn btn-focus-pair" style="padding:4px 10px; font-size:11px;" title="Isolate and inspect this interval's polygons on map">
+            🔍 Focus on Map
+          </button>
+        </div>
       </div>
     `;
 
-    // Click on pair card updates the plotted graph and isolates on map
+    // Theater Mode toggle handler
+    const theaterBtn = card.querySelector(".btn-theater-toggle");
+    if (theaterBtn) {
+      theaterBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        card.classList.toggle("theater-mode");
+        const isTheater = card.classList.contains("theater-mode");
+        theaterBtn.textContent = isTheater ? "🗗 Exit Fullscreen" : "⤢ Fullscreen Pair";
+        theaterBtn.style.color = isTheater ? "#fbbf24" : "#38bdf8";
+      });
+    }
+
+    // Focus on map handler
+    const focusBtn = card.querySelector(".btn-focus-pair");
+    if (focusBtn) {
+      focusBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        switchChangeViewMode(idx.toString());
+        document.querySelectorAll(".mask-pair-card").forEach(c => c.classList.remove("active-pair-card"));
+        card.classList.add("active-pair-card");
+      });
+    }
+
+    // Card click updates the plotted graph
     card.addEventListener("click", () => {
-      switchChangeViewMode(idx.toString());
       if (pair.spectral_profile) {
         updateSpectralGraph(pair.spectral_profile, `Pair ${idx + 1} (${pair.date_before} → ${pair.date_after})`);
       }
     });
 
+    // Attach interactive cursor inspector to this card's image tiles
+    attachCursorInspector(card, pair, idx);
+
     container.appendChild(card);
   });
 }
+
+/**
+ * Attaches real-time mousemove cursor inspector to all 6 band images of a pair.
+ */
+function attachCursorInspector(card, pair, idx) {
+  const sampleGrid = pair.cursor_sample_grid;
+  const tooltip = document.getElementById("spectral-cursor-tooltip");
+  const maskBoxes = card.querySelectorAll(".mask-box");
+  const crosshairs = card.querySelectorAll(".sync-crosshair");
+
+  function classify(ndvi, ndwi, ndbi) {
+    if (ndwi > 0.3 && ndbi < -0.1) return "Water";
+    if (ndvi > 0.6 && ndbi < 0.0) return "Dense Vegetation";
+    if (ndvi >= 0.2 && ndvi <= 0.6 && ndbi < 0.0) return "Moderate Veg";
+    if (ndbi > 0.0 && ndvi <= 0.2) return "Built-up / Urban";
+    if (ndvi <= 0.1 && ndbi <= 0.0 && ndwi <= 0.0) return "Bare Soil";
+    return "Transitional";
+  }
+
+  function getTransition(cB, cA) {
+    if (cB === cA) return "Unchanged Surface";
+    if ((cB.includes("Vegetation") || cB.includes("Bare Soil")) && cA.includes("Built-up")) {
+      return "🏗️ Construction";
+    }
+    if (cB.includes("Vegetation") && cA.includes("Bare Soil")) {
+      return "🪓 Clearance";
+    }
+    if (cB.includes("Water") || cA.includes("Water")) {
+      return "💧 Water Variation";
+    }
+    if (cB.includes("Built-up") && (cA.includes("Vegetation") || cA.includes("Bare Soil"))) {
+      return "🏚️ Demolition";
+    }
+    return `${cB} → ${cA}`;
+  }
+
+  maskBoxes.forEach((box) => {
+    box.addEventListener("mousemove", (e) => {
+      const rect = box.getBoundingClientRect();
+      const relX = Math.max(0, Math.min(0.999, (e.clientX - rect.left) / rect.width));
+      const relY = Math.max(0, Math.min(0.999, (e.clientY - rect.top) / rect.height));
+
+      const pxX = Math.floor(relX * 512);
+      const pxY = Math.floor(relY * 512);
+
+      // Synchronize glowing crosshair across all 6 plots in this pair
+      crosshairs.forEach(ch => {
+        ch.style.left = `${relX * 100}%`;
+        ch.style.top = `${relY * 100}%`;
+        ch.style.display = "block";
+      });
+
+      let ndviB = 0, ndwiB = 0, ndbiB = 0;
+      let ndviA = 0, ndwiA = 0, ndbiA = 0;
+
+      if (sampleGrid && sampleGrid.before && sampleGrid.before.ndvi) {
+        const sz = sampleGrid.grid_size || 64;
+        const r = Math.min(sz - 1, Math.floor(relY * sz));
+        const c = Math.min(sz - 1, Math.floor(relX * sz));
+        ndviB = sampleGrid.before.ndvi[r]?.[c] ?? 0;
+        ndwiB = sampleGrid.before.ndwi[r]?.[c] ?? 0;
+        ndbiB = sampleGrid.before.ndbi[r]?.[c] ?? 0;
+        ndviA = sampleGrid.after.ndvi[r]?.[c] ?? 0;
+        ndwiA = sampleGrid.after.ndwi[r]?.[c] ?? 0;
+        ndbiA = sampleGrid.after.ndbi[r]?.[c] ?? 0;
+      } else {
+        // Fallback to pair mean
+        ndviB = pair.spectral_profile?.before?.ndvi ?? 0.25;
+        ndwiB = pair.spectral_profile?.before?.ndwi ?? -0.3;
+        ndbiB = pair.spectral_profile?.before?.ndbi ?? 0.05;
+        ndviA = pair.spectral_profile?.after?.ndvi ?? 0.28;
+        ndwiA = pair.spectral_profile?.after?.ndwi ?? -0.32;
+        ndbiA = pair.spectral_profile?.after?.ndbi ?? 0.06;
+      }
+
+      const classB = classify(ndviB, ndwiB, ndbiB);
+      const classA = classify(ndviA, ndwiA, ndbiA);
+      const trans = getTransition(classB, classA);
+
+      // Update Card Live HUD Bar
+      const coordsEl = document.getElementById(`coords-${idx}`);
+      if (coordsEl) coordsEl.textContent = `Pixel [X: ${pxX}, Y: ${pxY}] (${Math.round(relX*100)}%, ${Math.round(relY*100)}%)`;
+
+      const vNdviB = document.getElementById(`val-ndvi-b-${idx}`);
+      const vNdwiB = document.getElementById(`val-ndwi-b-${idx}`);
+      const vNdbiB = document.getElementById(`val-ndbi-b-${idx}`);
+      const cB = document.getElementById(`class-b-${idx}`);
+
+      if (vNdviB) vNdviB.textContent = (ndviB >= 0 ? "+" : "") + Number(ndviB).toFixed(2);
+      if (vNdwiB) vNdwiB.textContent = (ndwiB >= 0 ? "+" : "") + Number(ndwiB).toFixed(2);
+      if (vNdbiB) vNdbiB.textContent = (ndbiB >= 0 ? "+" : "") + Number(ndbiB).toFixed(2);
+      if (cB) cB.textContent = classB;
+
+      const vNdviA = document.getElementById(`val-ndvi-a-${idx}`);
+      const vNdwiA = document.getElementById(`val-ndwi-a-${idx}`);
+      const vNdbiA = document.getElementById(`val-ndbi-a-${idx}`);
+      const cA = document.getElementById(`class-a-${idx}`);
+
+      if (vNdviA) vNdviA.textContent = (ndviA >= 0 ? "+" : "") + Number(ndviA).toFixed(2);
+      if (vNdwiA) vNdwiA.textContent = (ndwiA >= 0 ? "+" : "") + Number(ndwiA).toFixed(2);
+      if (vNdbiA) vNdbiA.textContent = (ndbiA >= 0 ? "+" : "") + Number(ndbiA).toFixed(2);
+      if (cA) cA.textContent = classA;
+
+      const transEl = document.getElementById(`trans-${idx}`);
+      if (transEl) transEl.textContent = trans;
+
+      // Update Floating Tooltip
+      if (tooltip) {
+        tooltip.style.display = "flex";
+        tooltip.style.left = `${e.clientX + 16}px`;
+        tooltip.style.top = `${e.clientY + 16}px`;
+
+        const tipCoords = document.getElementById("tip-coords");
+        const tipPair = document.getElementById("tip-pair");
+        const tipNdviB = document.getElementById("tip-ndvi-b");
+        const tipNdwiB = document.getElementById("tip-ndwi-b");
+        const tipNdbiB = document.getElementById("tip-ndbi-b");
+        const tipClassB = document.getElementById("tip-class-b");
+
+        const tipNdviA = document.getElementById("tip-ndvi-a");
+        const tipNdwiA = document.getElementById("tip-ndwi-a");
+        const tipNdbiA = document.getElementById("tip-ndbi-a");
+        const tipClassA = document.getElementById("tip-class-a");
+        const tipTrans = document.getElementById("tip-trans");
+
+        if (tipCoords) tipCoords.textContent = `Pixel [X: ${pxX}, Y: ${pxY}]`;
+        if (tipPair) tipPair.textContent = `Pair ${idx + 1}`;
+        if (tipNdviB) tipNdviB.textContent = (ndviB >= 0 ? "+" : "") + Number(ndviB).toFixed(2);
+        if (tipNdwiB) tipNdwiB.textContent = (ndwiB >= 0 ? "+" : "") + Number(ndwiB).toFixed(2);
+        if (tipNdbiB) tipNdbiB.textContent = (ndbiB >= 0 ? "+" : "") + Number(ndbiB).toFixed(2);
+        if (tipClassB) tipClassB.textContent = classB;
+
+        if (tipNdviA) tipNdviA.textContent = (ndviA >= 0 ? "+" : "") + Number(ndviA).toFixed(2);
+        if (tipNdwiA) tipNdwiA.textContent = (ndwiA >= 0 ? "+" : "") + Number(ndwiA).toFixed(2);
+        if (tipNdbiA) tipNdbiA.textContent = (ndbiA >= 0 ? "+" : "") + Number(ndbiA).toFixed(2);
+        if (tipClassA) tipClassA.textContent = classA;
+        if (tipTrans) tipTrans.textContent = trans;
+      }
+    });
+
+    box.addEventListener("mouseleave", () => {
+      crosshairs.forEach(ch => ch.style.display = "none");
+      if (tooltip) tooltip.style.display = "none";
+    });
+  });
+}
+
+
 
 /**
  * Renders the scrollable list of detected change regions.

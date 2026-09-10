@@ -46,7 +46,69 @@ from backend.services.change_engine.temporal_aggregator import (
 logger = logging.getLogger(__name__)
 
 
-def mask_to_png_base64(mask: np.ndarray, color=(6, 182, 212)) -> str:
+def rgb_to_png_base64(rgb: np.ndarray, max_dim: int = 384) -> str:
+    """Encodes normalized uint8 (H, W, 3) RGB array to a base64 PNG data URL."""
+    img = Image.fromarray(rgb.astype(np.uint8), mode="RGB")
+    h, w = rgb.shape[:2]
+    if h > max_dim or w > max_dim:
+        img = img.resize((max_dim, max_dim), Image.Resampling.BILINEAR)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def ndvi_to_png_base64(ndvi: np.ndarray, max_dim: int = 384) -> str:
+    """Maps continuous NDVI [-1.0, 1.0] to a standard colorized band map and base64 PNG.
+    
+    Ramp:
+    < 0.0: Water / Shadow (Deep Blue: #1e3a8a)
+    0.0 - 0.2: Built-up / Barren (Tan / Ochre: #d97706)
+    0.2 - 0.5: Moderate / Sparse Vegetation (Lime / Yellow-Green: #84cc16)
+    > 0.5: Dense Healthy Canopy (Vibrant Green: #16a34a)
+    """
+    h, w = ndvi.shape
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    rgba[:, :, 3] = 255
+
+    val = np.clip(ndvi, -1.0, 1.0)
+
+    # Segment 1: Water (< 0.0) -> navy to sky blue
+    w_mask = val < 0.0
+    w_ratio = np.clip((val + 1.0), 0.0, 1.0)
+    rgba[w_mask, 0] = (20 + w_ratio[w_mask] * 36).astype(np.uint8)
+    rgba[w_mask, 1] = (40 + w_ratio[w_mask] * 149).astype(np.uint8)
+    rgba[w_mask, 2] = (100 + w_ratio[w_mask] * 148).astype(np.uint8)
+
+    # Segment 2: Bare Soil / Built-up (0.0 to 0.2) -> Tan to Sand/Gold
+    s_mask = (val >= 0.0) & (val < 0.2)
+    s_ratio = val[s_mask] / 0.2
+    rgba[s_mask, 0] = (180 + s_ratio * 54).astype(np.uint8)
+    rgba[s_mask, 1] = (120 + s_ratio * 59).astype(np.uint8)
+    rgba[s_mask, 2] = (50 - s_ratio * 42).astype(np.uint8)
+
+    # Segment 3: Sparse to Moderate Veg (0.2 to 0.5) -> Yellow-Green
+    m_mask = (val >= 0.2) & (val < 0.5)
+    m_ratio = (val[m_mask] - 0.2) / 0.3
+    rgba[m_mask, 0] = (163 - m_ratio * 129).astype(np.uint8)
+    rgba[m_mask, 1] = (230 - m_ratio * 33).astype(np.uint8)
+    rgba[m_mask, 2] = (53 + m_ratio * 41).astype(np.uint8)
+
+    # Segment 4: Dense Veg (>= 0.5) -> Deep Lush Forest
+    d_mask = val >= 0.5
+    d_ratio = np.clip((val[d_mask] - 0.5) / 0.5, 0.0, 1.0)
+    rgba[d_mask, 0] = (34 - d_ratio * 30).astype(np.uint8)
+    rgba[d_mask, 1] = (197 - d_ratio * 77).astype(np.uint8)
+    rgba[d_mask, 2] = (94 - d_ratio * 7).astype(np.uint8)
+
+    img = Image.fromarray(rgba, mode="RGBA")
+    if h > max_dim or w > max_dim:
+        img = img.resize((max_dim, max_dim), Image.Resampling.BILINEAR)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def mask_to_png_base64(mask: np.ndarray, color=(6, 182, 212), max_dim: int = 384) -> str:
     """Encodes a boolean or uint8 mask to a base64 PNG data URL."""
     h, w = mask.shape
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
@@ -59,11 +121,12 @@ def mask_to_png_base64(mask: np.ndarray, color=(6, 182, 212)) -> str:
     rgba[~bool_mask, 3] = 200
 
     img = Image.fromarray(rgba, mode="RGBA")
-    if h > 256 or w > 256:
-        img = img.resize((256, 256), Image.Resampling.NEAREST)
+    if h > max_dim or w > max_dim:
+        img = img.resize((max_dim, max_dim), Image.Resampling.NEAREST)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
 
 
 def load_bands_and_masks(
@@ -213,9 +276,40 @@ class SequenceOrchestrator:
             }
         }
 
-        # Step 10: Generate Web-ready base64 PNG previews of the masks
+        # Step 10: Generate Web-ready base64 PNG previews for all bands and masks
+        rgb_b_png = rgb_to_png_base64(data_b["rgb"])
+        rgb_a_png = rgb_to_png_base64(data_a["rgb"])
+        ndvi_b_png = ndvi_to_png_base64(indices_b["ndvi"])
+        ndvi_a_png = ndvi_to_png_base64(indices_a["ndvi"])
         raw_mask_png = mask_to_png_base64(raw_binary_mask, color=(6, 182, 212))
         filtered_mask_png = mask_to_png_base64(surviving_mask, color=(245, 158, 11))
+
+        cand_pixels = int(np.sum(binary_mask))
+        fp_rejected = int(filter_stats.get("false_positives_rejected", 0))
+
+        # Step 11: Sample 64x64 spatial index grid for live cursor hover inspection
+        grid_step = max(1, h // 64)
+        ndvi_b_sample = np.round(indices_b["ndvi"][::grid_step, ::grid_step], 3).tolist()
+        ndwi_b_sample = np.round(indices_b["ndwi"][::grid_step, ::grid_step], 3).tolist()
+        ndbi_b_sample = np.round(indices_b["ndbi"][::grid_step, ::grid_step], 3).tolist()
+
+        ndvi_a_sample = np.round(indices_a["ndvi"][::grid_step, ::grid_step], 3).tolist()
+        ndwi_a_sample = np.round(indices_a["ndwi"][::grid_step, ::grid_step], 3).tolist()
+        ndbi_a_sample = np.round(indices_a["ndbi"][::grid_step, ::grid_step], 3).tolist()
+
+        cursor_sample_grid = {
+            "grid_size": len(ndvi_b_sample),
+            "before": {
+                "ndvi": ndvi_b_sample,
+                "ndwi": ndwi_b_sample,
+                "ndbi": ndbi_b_sample,
+            },
+            "after": {
+                "ndvi": ndvi_a_sample,
+                "ndwi": ndwi_a_sample,
+                "ndbi": ndbi_a_sample,
+            }
+        }
 
         return {
             "pair_index": pair_index,
@@ -224,10 +318,17 @@ class SequenceOrchestrator:
             "date_before": date_before,
             "date_after": date_after,
             "change_pct": change_pct,
+            "candidate_pixels": cand_pixels,
+            "false_positives_rejected": fp_rejected,
             "changed_pixels": changed_pixels,
+            "rgb_before_url": rgb_b_png,
+            "rgb_after_url": rgb_a_png,
+            "ndvi_before_url": ndvi_b_png,
+            "ndvi_after_url": ndvi_a_png,
             "binary_mask_url": raw_mask_png,
             "filtered_mask_url": filtered_mask_png,
             "spectral_profile": spectral_profile,
+            "cursor_sample_grid": cursor_sample_grid,
             "filter_stats": filter_stats,
             "change_geojson": {
                 "type": "FeatureCollection",
