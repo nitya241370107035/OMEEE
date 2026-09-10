@@ -39,15 +39,38 @@ def save_sequence_results(site_key: str, analysis_result: Dict[str, Any]) -> Dic
             cur.execute("DELETE FROM change_events WHERE site_key = %s;", (site_key,))
             cur.execute("DELETE FROM change_regions WHERE site_key = %s;", (site_key,))
 
+            cur.execute("SELECT tile_id FROM tiles;")
+            valid_tiles = {r[0] for r in cur.fetchall()}
+
             # 2. Insert pairwise change events
+            event_records = []
             for pair in pairwise:
-                t_before = pair.get("tile_before_id", "")
-                t_after = pair.get("tile_after_id", "")
+                t_before = pair.get("tile_before_id")
+                if t_before not in valid_tiles:
+                    t_before = None
+                t_after = pair.get("tile_after_id")
+                if t_after not in valid_tiles:
+                    t_after = None
                 d_before = pair.get("date_before")
                 d_after = pair.get("date_after")
                 features = pair.get("change_geojson", {}).get("features", [])
 
-                for f in features:
+                pair_meta = json.dumps({
+                    "binary_mask_url": pair.get("binary_mask_url"),
+                    "filtered_mask_url": pair.get("filtered_mask_url"),
+                    "rgb_before_url": pair.get("rgb_before_url"),
+                    "rgb_after_url": pair.get("rgb_after_url"),
+                    "ndvi_before_url": pair.get("ndvi_before_url"),
+                    "ndvi_after_url": pair.get("ndvi_after_url"),
+                    "candidate_pixels": pair.get("candidate_pixels"),
+                    "false_positives_rejected": pair.get("false_positives_rejected"),
+                    "changed_pixels": pair.get("changed_pixels"),
+                    "change_pct": pair.get("change_pct"),
+                    "cursor_sample_grid": pair.get("cursor_sample_grid"),
+                    "pair_spectral_profile": pair.get("spectral_profile"),
+                })
+
+                for f_idx, f in enumerate(features):
                     props = f.get("properties", {})
                     geom_json = json.dumps(f.get("geometry", {}))
                     c_type = props.get("change_type", "Unclassified Structural Change")
@@ -56,43 +79,43 @@ def save_sequence_results(site_key: str, analysis_result: Dict[str, Any]) -> Dic
                     area_px = int(props.get("area_px", 0))
                     area_sq_m = float(props.get("area_sq_m", 0.0))
 
-                    breakdown_payload = json.dumps({
-                        "spectral_profile": props.get("spectral_profile"),
-                        "binary_mask_url": pair.get("binary_mask_url"),
-                        "filtered_mask_url": pair.get("filtered_mask_url"),
-                        "rgb_before_url": pair.get("rgb_before_url"),
-                        "rgb_after_url": pair.get("rgb_after_url"),
-                        "ndvi_before_url": pair.get("ndvi_before_url"),
-                        "ndvi_after_url": pair.get("ndvi_after_url"),
-                        "candidate_pixels": pair.get("candidate_pixels"),
-                        "false_positives_rejected": pair.get("false_positives_rejected"),
-                        "changed_pixels": pair.get("changed_pixels"),
-                        "change_pct": pair.get("change_pct"),
-                        "cursor_sample_grid": pair.get("cursor_sample_grid"),
-                        "pair_spectral_profile": pair.get("spectral_profile"),
-                    })
+                    if f_idx == 0:
+                        payload = json.dumps({
+                            **json.loads(pair_meta),
+                            "spectral_profile": props.get("spectral_profile"),
+                        })
+                    else:
+                        payload = json.dumps({
+                            "spectral_profile": props.get("spectral_profile"),
+                        })
 
-                    cur.execute(
-                        """
-                        INSERT INTO change_events (
-                            site_key, tile_before, tile_after, date_before, date_after,
-                            change_type, before_class, after_class, area_px, area_sq_m,
-                            confidence, detected_date, geom, confidence_breakdown
-                        ) VALUES (
-                            %s, %s, %s, %s, %s,
-                            %s, %s, %s, %s, %s,
-                            1.0, NOW(), ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326)), %s
-                        );
-                        """,
-                        (
-                            site_key, t_before, t_after, d_before, d_after,
-                            c_type, b_class, a_class, area_px, area_sq_m,
-                            geom_json, breakdown_payload
-                        )
-                    )
-                    events_inserted += 1
+                    event_records.append((
+                        site_key, t_before, t_after, d_before, d_after,
+                        c_type, b_class, a_class, area_px, area_sq_m,
+                        geom_json, payload
+                    ))
+
+            if event_records:
+                psycopg2.extras.execute_batch(
+                    cur,
+                    """
+                    INSERT INTO change_events (
+                        site_key, tile_before, tile_after, date_before, date_after,
+                        change_type, before_class, after_class, area_px, area_sq_m,
+                        confidence, detected_date, geom, confidence_breakdown
+                    ) VALUES (
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        1.0, NOW(), ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326)), %s
+                    );
+                    """,
+                    event_records,
+                    page_size=200
+                )
+            events_inserted = len(event_records)
 
             # 3. Insert overall change regions
+            region_records = []
             for f in overall_features:
                 props = f.get("properties", {})
                 geom_json = json.dumps(f.get("geometry", {}))
@@ -100,7 +123,14 @@ def save_sequence_results(site_key: str, analysis_result: Dict[str, Any]) -> Dic
                 earliest_date = props.get("earliest_supported_date")
                 area_sq_m = float(props.get("area_sq_m", 0.0)) if props.get("area_sq_m") else None
 
-                cur.execute(
+                region_records.append((
+                    site_key, c_type, earliest_date,
+                    area_sq_m, geom_json, json.dumps(props)
+                ))
+
+            if region_records:
+                psycopg2.extras.execute_batch(
+                    cur,
                     """
                     INSERT INTO change_regions (
                         site_key, change_type, earliest_supported_date,
@@ -110,12 +140,10 @@ def save_sequence_results(site_key: str, analysis_result: Dict[str, Any]) -> Dic
                         %s, ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326)), %s
                     );
                     """,
-                    (
-                        site_key, c_type, earliest_date,
-                        area_sq_m, geom_json, json.dumps(props)
-                    )
+                    region_records,
+                    page_size=200
                 )
-                regions_inserted += 1
+            regions_inserted = len(region_records)
 
         conn.commit()
         logger.info(
