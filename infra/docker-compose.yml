@@ -76,7 +76,7 @@ services:
       - MINIO_SECRET_KEY=eo_password
       - PORT=8000
     ports:
-      - "${PORT:-8000}:8000"
+      - "${PORT:-8080}:8000"
     volumes:
       - ../data:/app/data
       - ../models:/app/models

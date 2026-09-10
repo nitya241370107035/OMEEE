@@ -20,12 +20,13 @@ import psycopg2
 import psycopg2.extras
 from shapely.geometry import mapping, Polygon, MultiPolygon
 
-from backend.ingestion.tiler import TileCandidate
+# Lazy import to avoid importing heavy raster dependencies during DB migrations
+TileCandidate = Any
 
 logger = logging.getLogger(__name__)
 
 PG_HOST = os.getenv("POSTGRES_HOST", "localhost")
-PG_PORT = os.getenv("POSTGRES_PORT", "5434")
+PG_PORT = os.getenv("POSTGRES_PORT", "5432")
 PG_DB = os.getenv("POSTGRES_DB", "eo_archive")
 PG_USER = os.getenv("POSTGRES_USER", "eo_admin")
 PG_PASSWORD = os.getenv("POSTGRES_PASSWORD", "eo_password")
