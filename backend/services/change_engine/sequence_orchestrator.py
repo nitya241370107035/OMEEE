@@ -235,10 +235,13 @@ class SequenceOrchestrator:
         valid_pixels = ~(data_b["bad_mask"] | data_a["bad_mask"])
 
         # Step 3: Run Binary ChangeFormer model directly from change_detector_module
-        raw_binary_mask = self.detector.get_binary_mask(data_b["rgb"], data_a["rgb"])
-        binary_mask = (raw_binary_mask > 0) & valid_pixels
+        try:
+            raw_neural_mask = self.detector.get_binary_mask(data_b["rgb"], data_a["rgb"])
+        except Exception as e:
+            logger.warning(f"ChangeDetector inference warning: {e}. Continuing with spectral CVA.")
+            raw_neural_mask = np.zeros((h, w), dtype=np.uint8)
 
-        # Step 4: Compute spectral indices independently
+        # Step 4: Compute spectral indices independently from multi-spectral bands
         indices_b = compute_spectral_indices(
             data_b["green"], data_b["red"], data_b["nir"], data_b["swir"]
         )
@@ -246,19 +249,31 @@ class SequenceOrchestrator:
             data_a["green"], data_a["red"], data_a["nir"], data_a["swir"]
         )
 
-        # Step 5: Spectral classification
+        # Step 5: Multi-spectral Change Vector Analysis (CVA)
+        # S2 bands capture vegetation loss/gain (|d_ndvi| > 0.15), built-up/soil (|d_ndbi| > 0.12), and water (|d_ndwi| > 0.15)
+        d_ndvi = np.abs(indices_a["ndvi"] - indices_b["ndvi"])
+        d_ndbi = np.abs(indices_a["ndbi"] - indices_b["ndbi"])
+        d_ndwi = np.abs(indices_a["ndwi"] - indices_b["ndwi"])
+        spectral_cva_mask = (d_ndvi > 0.15) | (d_ndbi > 0.12) | (d_ndwi > 0.15)
+
+        # Step 6: Hybrid Candidate Binary Change Mask (ChangeDetector Neural Mask + Multi-Spectral CVA)
+        candidate_binary_mask = ((raw_neural_mask > 0) | spectral_cva_mask) & valid_pixels
+
+        # Step 7: Spectral classification (Vegetation, Water, Urban/Built-up, Bare Soil)
         class_before_map = classify_pixels(indices_b["ndvi"], indices_b["ndwi"], indices_b["ndbi"])
         class_after_map = classify_pixels(indices_a["ndvi"], indices_a["ndwi"], indices_a["ndbi"])
 
-        # Step 6: Semantic False-Positive Filter (before_class == after_class is discarded)
+        # Step 8: Semantic Contradiction Filtering
+        # User rule: "if in binary masked showing pixel changes but bands telling nothing is changed then dont include that pixel in change"
+        # If before_class == after_class, reject candidate pixel as phenology/illumination false positive.
         surviving_mask, filter_stats = filter_semantic_changes(
-            class_before_map, class_after_map, binary_mask=binary_mask
+            class_before_map, class_after_map, binary_mask=candidate_binary_mask
         )
 
-        # Step 7: Transition Matrix Lookup
+        # Step 9: Transition Matrix Lookup
         change_type_map = vectorized_change_type_lookup(class_before_map, class_after_map)
 
-        # Step 8: Vectorize to GeoJSON polygons with road morphology test & spectral sampling
+        # Step 10: Vectorize to GeoJSON polygons with road morphology test & spectral sampling
         features = polygonize_change_mask(
             mask=surviving_mask,
             geotransform=transform,
@@ -269,11 +284,11 @@ class SequenceOrchestrator:
             indices_after=indices_a,
         )
 
-        total_pixels = binary_mask.size
+        total_pixels = candidate_binary_mask.size
         changed_pixels = int(np.sum(surviving_mask))
         change_pct = round(float((changed_pixels / total_pixels) * 100.0), 2)
 
-        # Step 9: Pair-level aggregate spectral profile across changed pixels
+        # Step 11: Pair-level aggregate spectral profile across changed pixels
         if changed_pixels > 0:
             b_ndvi = round(float(np.nanmean(indices_b["ndvi"][surviving_mask])), 3)
             b_ndbi = round(float(np.nanmean(indices_b["ndbi"][surviving_mask])), 3)
@@ -295,26 +310,28 @@ class SequenceOrchestrator:
             }
         }
 
-        # Step 10: Generate Web-ready base64 PNG previews for all bands and masks
+        # Step 12: Generate Web-ready base64 PNG previews for all bands and masks
         rgb_b_png = rgb_to_png_base64(data_b["rgb"])
         rgb_a_png = rgb_to_png_base64(data_a["rgb"])
         ndvi_b_png = ndvi_to_png_base64(indices_b["ndvi"])
         ndvi_a_png = ndvi_to_png_base64(indices_a["ndvi"])
-        raw_mask_png = mask_to_png_base64(raw_binary_mask, color=(6, 182, 212))
+        raw_mask_png = mask_to_png_base64(candidate_binary_mask, color=(6, 182, 212))
         filtered_mask_png = mask_to_png_base64(surviving_mask, color=(245, 158, 11))
 
-        cand_pixels = int(np.sum(binary_mask))
+        cand_pixels = int(np.sum(candidate_binary_mask))
         fp_rejected = int(filter_stats.get("false_positives_rejected", 0))
 
-        # Step 11: Sample 64x64 spatial index grid for live cursor hover inspection
+        # Step 13: Sample 64x64 spatial index grid for live cursor hover inspection
         grid_step = max(1, h // 64)
         ndvi_b_sample = np.round(indices_b["ndvi"][::grid_step, ::grid_step], 3).tolist()
         ndwi_b_sample = np.round(indices_b["ndwi"][::grid_step, ::grid_step], 3).tolist()
         ndbi_b_sample = np.round(indices_b["ndbi"][::grid_step, ::grid_step], 3).tolist()
+        class_b_sample = class_before_map[::grid_step, ::grid_step].tolist()
 
         ndvi_a_sample = np.round(indices_a["ndvi"][::grid_step, ::grid_step], 3).tolist()
         ndwi_a_sample = np.round(indices_a["ndwi"][::grid_step, ::grid_step], 3).tolist()
         ndbi_a_sample = np.round(indices_a["ndbi"][::grid_step, ::grid_step], 3).tolist()
+        class_a_sample = class_after_map[::grid_step, ::grid_step].tolist()
 
         cursor_sample_grid = {
             "grid_size": len(ndvi_b_sample),
@@ -322,11 +339,13 @@ class SequenceOrchestrator:
                 "ndvi": ndvi_b_sample,
                 "ndwi": ndwi_b_sample,
                 "ndbi": ndbi_b_sample,
+                "class": class_b_sample,
             },
             "after": {
                 "ndvi": ndvi_a_sample,
                 "ndwi": ndwi_a_sample,
                 "ndbi": ndbi_a_sample,
+                "class": class_a_sample,
             }
         }
 
