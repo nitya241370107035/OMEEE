@@ -20,6 +20,7 @@ import numpy as np
 from PIL import Image
 import rasterio
 
+from backend.change_detector_module.detector import ChangeDetector
 from backend.services.change_engine.binary_change_adapter import (
     BinaryChangeAdapter,
     load_tile_rgb,
@@ -184,11 +185,29 @@ def load_bands_and_masks(
     }
 
 
-class SequenceOrchestrator:
-    """Orchestrates end-to-end multi-temporal sequence analysis."""
+_CHANGE_DETECTOR_SINGLETON: Optional[ChangeDetector] = None
 
-    def __init__(self, adapter: Optional[BinaryChangeAdapter] = None):
-        self.adapter = adapter or BinaryChangeAdapter()
+
+def get_change_detector() -> ChangeDetector:
+    """Returns the singleton MTKD-ChangeFormer ChangeDetector instance from change_detector_module."""
+    global _CHANGE_DETECTOR_SINGLETON
+    if _CHANGE_DETECTOR_SINGLETON is None:
+        logger.info("Initializing binary mask model directly from backend.change_detector_module.detector.ChangeDetector...")
+        _CHANGE_DETECTOR_SINGLETON = ChangeDetector()
+        logger.info("Binary mask model (change_detector_module) initialized successfully.")
+    return _CHANGE_DETECTOR_SINGLETON
+
+
+class SequenceOrchestrator:
+    """Orchestrates end-to-end multi-temporal sequence analysis using change_detector_module."""
+
+    def __init__(self, detector: Optional[ChangeDetector] = None, adapter: Optional[BinaryChangeAdapter] = None):
+        if detector is not None:
+            self.detector = detector
+        elif adapter is not None and hasattr(adapter, "detector"):
+            self.detector = adapter.detector
+        else:
+            self.detector = get_change_detector()
 
     def process_pair(
         self,
@@ -215,8 +234,8 @@ class SequenceOrchestrator:
         # Step 2: Valid pixels (exclude clouds/nodata in either snapshot)
         valid_pixels = ~(data_b["bad_mask"] | data_a["bad_mask"])
 
-        # Step 3: Run Binary ChangeFormer model
-        raw_binary_mask = self.adapter.predict_binary_mask(data_b["rgb"], data_a["rgb"])
+        # Step 3: Run Binary ChangeFormer model directly from change_detector_module
+        raw_binary_mask = self.detector.get_binary_mask(data_b["rgb"], data_a["rgb"])
         binary_mask = (raw_binary_mask > 0) & valid_pixels
 
         # Step 4: Compute spectral indices independently
