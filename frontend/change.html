@@ -1093,7 +1093,7 @@
     .mask-img-wrap img {
       width: 100%;
       height: 100%;
-      object-fit: cover;
+      object-fit: contain;
       display: block;
       transition: transform 0.25s ease;
       pointer-events: none;
@@ -1538,10 +1538,17 @@
 
     .tree-root-thumb {
       width: 100%;
-      height: 90px;
-      object-fit: cover;
+      aspect-ratio: 1 / 1;
+      object-fit: contain;
+      background: #030712;
       border-radius: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      display: block;
+      transition: transform 0.2s ease;
+    }
+
+    .tree-root-thumb:hover {
+      transform: scale(1.02);
     }
 
     /* Vertical SVG / Stem Connectors */
@@ -1624,11 +1631,19 @@
 
     .tree-image-preview {
       width: 100%;
-      height: 120px;
-      object-fit: cover;
+      aspect-ratio: 1 / 1;
+      object-fit: contain;
+      background: #030712;
       border-radius: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
       cursor: crosshair;
+      display: block;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .tree-image-preview:hover {
+      transform: scale(1.02);
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);
     }
 
     /* ============================================================
@@ -1671,7 +1686,8 @@
 
     .tree-mask-img {
       width: 100%;
-      max-height: 180px;
+      aspect-ratio: 1 / 1;
+      max-height: 240px;
       object-fit: contain;
       border-radius: 6px;
       border: 1px solid rgba(245, 158, 11, 0.25);
@@ -1848,7 +1864,7 @@
 
     .tree-classified-plot-img {
       width: 100%;
-      max-height: 160px;
+      max-height: 240px;
       aspect-ratio: 1;
       object-fit: contain;
       border-radius: 6px;
@@ -1865,7 +1881,7 @@
 
     .tree-classified-canvas {
       width: 100%;
-      max-height: 160px;
+      max-height: 240px;
       aspect-ratio: 1;
       object-fit: contain;
       border-radius: 6px;
@@ -2565,6 +2581,6 @@
   </div>
 
   <!-- Dedicated Studio Controller -->
-  <script src="/frontend/change.js?v=20260913_tree_v7"></script>
+  <script src="/frontend/change.js?v=20260913_tree_v8"></script>
 </body>
 </html>
