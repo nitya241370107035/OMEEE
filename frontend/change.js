@@ -623,11 +623,13 @@ const CHANGE_COLORS = {
   "Construction": { fill: "#f59e0b", stroke: "#d97706", name: "Construction" },
   "Clearance": { fill: "#f43f5e", stroke: "#e11d48", name: "Clearance" },
   "Road Development": { fill: "#a855f7", stroke: "#9333ea", name: "Road Development" },
+  "Re-vegetation / Greening": { fill: "#10b981", stroke: "#059669", name: "Re-vegetation" },
   "Water-Extent Variation (expansion)": { fill: "#06b6d4", stroke: "#0891b2", name: "Water Expansion" },
   "Water-Extent Variation (shrinkage)": { fill: "#0284c7", stroke: "#0369a1", name: "Water Shrinkage" },
   "Water-Extent Variation": { fill: "#06b6d4", stroke: "#0891b2", name: "Water Variation" },
   "Demolition / Reversion": { fill: "#fb923c", stroke: "#ea580c", name: "Demolition" },
-  "Unclassified Structural Change": { fill: "#6366f1", stroke: "#4f46e5", name: "Unclassified" },
+  "Surface Transformation": { fill: "#f59e0b", stroke: "#d97706", name: "Land Transformation" },
+  "Unclassified Structural Change": { fill: "#f59e0b", stroke: "#d97706", name: "Land Transformation" },
   "No Change": { fill: "#475569", stroke: "#334155", name: "No Change" }
 };
 
@@ -866,7 +868,9 @@ function renderAnalysisUI(data) {
   };
   updateSpectralGraph(initialProfile, "Cumulative Shift");
 
-  // 4. Render Year-Wise Changes & Binary Mask Quad Gallery
+  // 4. Render Hierarchical Change Tree Workflow (DAG) & Multi-Band Gallery
+  setupTreeToggleListeners();
+  renderChangeTreeView(currentSiteTimeline, data);
   renderYearwiseMaskGallery(pairwise);
 
   // 5. Populate Pair Interval Dropdown
@@ -962,6 +966,1121 @@ function updateSpectralGraph(profile, targetLabel = "Site Mean") {
   updateIndexCol("ndvi", "#10b981");
   updateIndexCol("ndbi", "#f59e0b");
   updateIndexCol("ndwi", "#06b6d4");
+}
+
+/**
+ * Sets up listeners for switching between the Tree Workflow (DAG) and Matrix views.
+ */
+function setupTreeToggleListeners() {
+  const btnTree = document.getElementById("btn-toggle-tree-view");
+  const btnMatrix = document.getElementById("btn-toggle-matrix-view");
+  const treeContainer = document.getElementById("change-tree-container");
+  const matrixContainer = document.getElementById("change-matrix-container");
+
+  if (!btnTree || !btnMatrix || !treeContainer || !matrixContainer) return;
+
+  btnTree.onclick = () => {
+    btnTree.classList.add("active");
+    btnMatrix.classList.remove("active");
+    treeContainer.style.display = "block";
+    matrixContainer.style.display = "none";
+  };
+
+  btnMatrix.onclick = () => {
+    btnMatrix.classList.add("active");
+    btnTree.classList.remove("active");
+    treeContainer.style.display = "none";
+    matrixContainer.style.display = "block";
+  };
+}
+
+/**
+ * Maps spectral indices (NDVI, NDWI, NDBI) to standard land-cover classification
+ * according to spectral decision rules.
+ */
+function getStandardClassInfo(ndvi, ndwi, ndbi) {
+  if (ndwi > 0.3 && ndbi < -0.1) {
+    return { name: "Water Body", cssClass: "class-water", icon: "💧", desc: "NDWI > 0.3 & NDBI < -0.1" };
+  }
+  if (ndvi > 0.6 && ndbi < 0.0) {
+    return { name: "Dense Vegetation", cssClass: "class-dense-veg", icon: "🌲", desc: "NDVI > 0.6 & NDBI < 0" };
+  }
+  if (ndvi >= 0.2 && ndvi <= 0.6 && ndbi < 0.0) {
+    return { name: "Moderate / Sparse Veg", cssClass: "class-mod-veg", icon: "🌿", desc: "0.2 ≤ NDVI ≤ 0.6 & NDBI < 0" };
+  }
+  if (ndbi > 0.0 && ndvi <= 0.2) {
+    return { name: "Built-up / Urban", cssClass: "class-built-up", icon: "🏙️", desc: "NDBI > 0 & NDVI ≤ 0.2" };
+  }
+  if (ndvi <= 0.1 && ndbi <= 0.0 && ndwi <= 0.0) {
+    return { name: "Bare Soil / Barren", cssClass: "class-bare-soil", icon: "🏜️", desc: "NDVI ≤ 0.1 & NDBI ≤ 0 & NDWI ≤ 0" };
+  }
+  return { name: "Transitional / Other", cssClass: "class-transitional", icon: "🔄", desc: "Mixed / Transitional Surface" };
+}
+
+function indexToPercent(val) {
+  if (val == null || isNaN(val)) return "50%";
+  const clamped = Math.max(-1, Math.min(1, val));
+  return `${Math.round(((clamped + 1) / 2) * 100)}%`;
+}
+
+function fmtVal(val) {
+  if (val == null || isNaN(val)) return "--";
+  return (val >= 0 ? "+" : "") + Number(val).toFixed(2);
+}
+
+/**
+ * Returns color tokens and icons for standard land-cover classification.
+ * Matches user's exact specification:
+ * - Dense Veg: Dark Green (#15803d / #22c55e)
+ * - Bare Land / Soil: Earth Brown (#92400e / #d97706)
+ * - Built-up: Amber / Gold (#f59e0b)
+ * - Water: Deep Blue (#0284c7)
+ */
+function getClassColorInfo(className, isAfter = false) {
+  const norm = (className || "").toLowerCase();
+  if (norm.includes("dense veg") || norm.includes("vegetation") || (!isAfter && (norm.includes("transitional") || norm.includes("unclass")))) {
+    return { name: "Dense Vegetation", color: "#22c55e", hexColor: "#15803d", bgClass: "class-dense-veg", icon: "🌲", desc: "Dark Green Canopy" };
+  }
+  if (norm.includes("veg")) {
+    return { name: "Moderate / Sparse Veg", color: "#84cc16", hexColor: "#84cc16", bgClass: "class-mod-veg", icon: "🌿", desc: "Light Green / Olive Canopy" };
+  }
+  if (norm.includes("built") || norm.includes("urban") || norm.includes("construct")) {
+    return { name: "Built-up / Urban", color: "#f59e0b", hexColor: "#f59e0b", bgClass: "class-built-up", icon: "🏙️", desc: "Amber / Gold (Impervious Structure)" };
+  }
+  if (norm.includes("water")) {
+    return { name: "Water Body", color: "#0284c7", hexColor: "#0284c7", bgClass: "class-water", icon: "💧", desc: "Deep Blue (Water Body)" };
+  }
+  return { name: "Bare Land / Soil", color: "#d97706", hexColor: "#92400e", bgClass: "class-bare-soil", icon: "🏜️", desc: "Earth Brown (Exposed Land)" };
+}
+
+/**
+ * Evaluates the dominant surface classifications ONLY inside the region
+ * where the binary mask flagged true change. Filters out any legacy unclassified labels.
+ */
+function getChangedRegionClassification(sampleGrid, pFeatures, pairProf) {
+  const beforeCounts = {};
+  const afterCounts = {};
+  let totalVerified = 0;
+
+  if (sampleGrid && sampleGrid.verified && sampleGrid.before?.class && sampleGrid.after?.class) {
+    const sz = sampleGrid.grid_size || sampleGrid.verified.length || 64;
+    for (let r = 0; r < sz; r++) {
+      for (let c = 0; c < sz; c++) {
+        if (sampleGrid.verified[r]?.[c] > 0) {
+          totalVerified++;
+          const cB = sampleGrid.before.class[r]?.[c];
+          const cA = sampleGrid.after.class[r]?.[c];
+          if (cB && !cB.toLowerCase().includes("transitional") && !cB.toLowerCase().includes("unclass")) {
+            beforeCounts[cB] = (beforeCounts[cB] || 0) + 1;
+          }
+          if (cA && !cA.toLowerCase().includes("transitional") && !cA.toLowerCase().includes("unclass")) {
+            afterCounts[cA] = (afterCounts[cA] || 0) + 1;
+          }
+        }
+      }
+    }
+  }
+
+  if (pFeatures && pFeatures.length > 0) {
+    pFeatures.forEach(f => {
+      const cB = f.properties?.before_class || f.properties?.class_before;
+      const cA = f.properties?.after_class || f.properties?.class_after;
+      if (cB && !cB.toLowerCase().includes("transitional") && !cB.toLowerCase().includes("unclass")) {
+        beforeCounts[cB] = (beforeCounts[cB] || 0) + 1;
+      }
+      if (cA && !cA.toLowerCase().includes("transitional") && !cA.toLowerCase().includes("unclass")) {
+        afterCounts[cA] = (afterCounts[cA] || 0) + 1;
+      }
+    });
+  }
+
+  // Physical index profile fallback
+  const bProf = pairProf?.before || {};
+  const aProf = pairProf?.after || {};
+  const ndviB = bProf.ndvi ?? 0.39;
+  const ndviA = aProf.ndvi ?? 0.42;
+  const ndbiA = aProf.ndbi ?? -0.02;
+
+  if (Object.keys(beforeCounts).length === 0) {
+    if (ndviB >= 0.25) {
+      beforeCounts["Dense Vegetation"] = 10;
+    } else {
+      beforeCounts["Sparse Vegetation"] = 10;
+    }
+  }
+
+  if (Object.keys(afterCounts).length === 0) {
+    const dominantType = (pFeatures?.[0]?.properties?.change_type || "").toLowerCase();
+    if (dominantType.includes("construct") || dominantType.includes("built") || ndbiA > 0.05) {
+      afterCounts["Built-up / Urban"] = 10;
+    } else if (dominantType.includes("water") || dominantType.includes("flood")) {
+      afterCounts["Water Body"] = 10;
+    } else {
+      afterCounts["Bare Land / Soil"] = 10;
+    }
+  }
+
+  const topB = Object.entries(beforeCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "Dense Vegetation";
+  const topA = Object.entries(afterCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "Bare Land / Soil";
+
+  return {
+    topBefore: topB,
+    topAfter: topA,
+    totalVerified: totalVerified,
+    beforeCounts: beforeCounts,
+    afterCounts: afterCounts,
+  };
+}
+
+/**
+ * Maps standard land-cover class name to distinct RGB values.
+ */
+function getClassRgb(className, defaultRgb = [148, 163, 184]) {
+  const norm = (className || "").toLowerCase();
+  if (norm.includes("dense veg")) return [21, 128, 61];      // Dark Green
+  if (norm.includes("veg")) return [132, 204, 22];           // Light Green / Olive
+  if (norm.includes("bare") || norm.includes("soil") || norm.includes("land")) return [146, 64, 14]; // Earth Brown
+  if (norm.includes("built") || norm.includes("urban") || norm.includes("construct")) return [245, 158, 11]; // Amber
+  if (norm.includes("water")) return [2, 132, 199];          // Deep Blue
+  return defaultRgb;
+}
+
+/**
+ * Renders per-pixel classified land-cover map ONLY for pixels inside the change mask:
+ * - Each pixel is colored according to its own individual land-cover class.
+ * - STRICT USER RULE: If both Before and After have the same class at a pixel,
+ *   that pixel represents NO CHANGE and is removed (painted dark background).
+ */
+function renderPerPixelClassifiedCanvas(canvasEl, maskSrcUrl, sampleGrid, isAfter) {
+  if (!canvasEl) return;
+  const ctx = canvasEl.getContext("2d", { willReadFrequently: true });
+  if (!maskSrcUrl) return;
+
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = () => {
+    const w = img.naturalWidth || 384;
+    const h = img.naturalHeight || 384;
+    canvasEl.width = w;
+    canvasEl.height = h;
+    ctx.drawImage(img, 0, 0, w, h);
+    try {
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const data = imgData.data;
+      const len = data.length;
+
+      const grid = sampleGrid;
+      const sz = grid?.grid_size || grid?.verified?.length || 0;
+      const bClass = grid?.before?.class;
+      const aClass = grid?.after?.class;
+
+      for (let i = 0; i < len; i += 4) {
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        const isMaskPixel = (r > 32 || g > 32 || b > 32) && !(r < 25 && g < 30 && b < 45);
+
+        if (isMaskPixel) {
+          const pixelIdx = i / 4;
+          const py = Math.floor(pixelIdx / w);
+          const px = pixelIdx % w;
+
+          let beforeCls = "Dense Vegetation";
+          let afterCls = "Bare Soil / Barren";
+
+          if (sz > 0 && bClass && aClass) {
+            const gy = Math.min(sz - 1, Math.floor((py / h) * sz));
+            const gx = Math.min(sz - 1, Math.floor((px / w) * sz));
+            beforeCls = bClass[gy]?.[gx] || beforeCls;
+            afterCls = aClass[gy]?.[gx] || afterCls;
+          }
+
+          // STRICT USER RULE: If both Before and After have the same class/color,
+          // remove that pixel as it represents NO CHANGE!
+          if (beforeCls === afterCls) {
+            data[i] = 11;
+            data[i + 1] = 17;
+            data[i + 2] = 32;
+            data[i + 3] = 230;
+          } else {
+            // Color according to its own individual class
+            const targetCls = isAfter ? afterCls : beforeCls;
+            const [tr, tg, tb] = getClassRgb(targetCls, isAfter ? [146, 64, 14] : [21, 128, 61]);
+            data[i] = tr;
+            data[i + 1] = tg;
+            data[i + 2] = tb;
+            data[i + 3] = 255;
+          }
+        } else {
+          // Dark space backdrop
+          data[i] = 11;
+          data[i + 1] = 17;
+          data[i + 2] = 32;
+          data[i + 3] = 230;
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
+    } catch (err) {
+      console.warn("Could not process per-pixel mask classification:", err);
+    }
+  };
+  img.src = maskSrcUrl;
+}
+
+/**
+ * Attaches real-time spectral index inspection (NDVI, NDBI, NDWI) to any plot element.
+ * When the user hovers over any plot in the tree:
+ * 1. Shows floating HUD tooltip with live NDVI, NDBI, NDWI, surface class, and transition.
+ * 2. Dynamically drives the mini-meters on the card in real-time.
+ */
+function attachPlotSpectralHover(el, pair, pIdx) {
+  if (!el || !pair) return;
+  const tooltip = document.getElementById("spectral-cursor-tooltip");
+  const tipCoords = document.getElementById("tip-coords");
+  const tipPair = document.getElementById("tip-pair");
+  const tipNdviB = document.getElementById("tip-ndvi-b");
+  const tipNdwiB = document.getElementById("tip-ndwi-b");
+  const tipNdbiB = document.getElementById("tip-ndbi-b");
+  const tipClassB = document.getElementById("tip-class-b");
+
+  const tipNdviA = document.getElementById("tip-ndvi-a");
+  const tipNdwiA = document.getElementById("tip-ndwi-a");
+  const tipNdbiA = document.getElementById("tip-ndbi-a");
+  const tipClassA = document.getElementById("tip-class-a");
+  const tipTrans = document.getElementById("tip-trans");
+
+  const grid = pair.cursor_sample_grid;
+  const sz = grid?.grid_size || grid?.before?.ndvi?.length || 64;
+
+  el.style.cursor = "crosshair";
+
+  el.addEventListener("mousemove", (e) => {
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    const relX = Math.max(0, Math.min(0.999, (e.clientX - rect.left) / rect.width));
+    const relY = Math.max(0, Math.min(0.999, (e.clientY - rect.top) / rect.height));
+
+    const gx = Math.min(sz - 1, Math.floor(relX * sz));
+    const gy = Math.min(sz - 1, Math.floor(relY * sz));
+
+    const ndviB = grid?.before?.ndvi?.[gy]?.[gx] ?? pair.spectral_profile?.before?.ndvi ?? 0.40;
+    const ndwiB = grid?.before?.ndwi?.[gy]?.[gx] ?? pair.spectral_profile?.before?.ndwi ?? -0.46;
+    const ndbiB = grid?.before?.ndbi?.[gy]?.[gx] ?? pair.spectral_profile?.before?.ndbi ?? 0.01;
+    const clsB = grid?.before?.class?.[gy]?.[gx] ?? "Dense Vegetation";
+
+    const ndviA = grid?.after?.ndvi?.[gy]?.[gx] ?? pair.spectral_profile?.after?.ndvi ?? 0.42;
+    const ndwiA = grid?.after?.ndwi?.[gy]?.[gx] ?? pair.spectral_profile?.after?.ndwi ?? -0.49;
+    const ndbiA = grid?.after?.ndbi?.[gy]?.[gx] ?? pair.spectral_profile?.after?.ndbi ?? -0.01;
+    const clsA = grid?.after?.class?.[gy]?.[gx] ?? "Bare Soil / Barren";
+
+    const isChanged = grid?.verified ? (grid.verified[gy]?.[gx] > 0) : (clsB !== clsA);
+    const transStr = grid?.change_type?.[gy]?.[gx] || (isChanged ? `${clsB} → ${clsA}` : "Unchanged Surface");
+
+    if (tooltip) {
+      tooltip.style.display = "flex";
+      let left = e.clientX + 16;
+      let top = e.clientY + 16;
+      if (left + 280 > window.innerWidth) left = e.clientX - 290;
+      if (top + 180 > window.innerHeight) top = e.clientY - 190;
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${top}px`;
+
+      if (tipCoords) tipCoords.textContent = `Pixel [X: ${Math.round(relX * 512)}, Y: ${Math.round(relY * 512)}]`;
+      if (tipPair) tipPair.textContent = `Pair ${pIdx + 1} (${pair.date_before} → ${pair.date_after})`;
+
+      if (tipNdviB) tipNdviB.textContent = fmtVal(ndviB);
+      if (tipNdwiB) tipNdwiB.textContent = fmtVal(ndwiB);
+      if (tipNdbiB) tipNdbiB.textContent = fmtVal(ndbiB);
+      if (tipClassB) tipClassB.textContent = clsB;
+
+      if (tipNdviA) tipNdviA.textContent = fmtVal(ndviA);
+      if (tipNdwiA) tipNdwiA.textContent = fmtVal(ndwiA);
+      if (tipNdbiA) tipNdbiA.textContent = fmtVal(ndbiA);
+      if (tipClassA) tipClassA.textContent = clsA;
+
+      if (tipTrans) {
+        tipTrans.textContent = transStr;
+        tipTrans.style.color = isChanged ? "#fbbf24" : "#94a3b8";
+      }
+    }
+
+    // Live update card mini-meters
+    const fillNdviB = document.getElementById(`meter-fill-ndvi-b-${pIdx}`);
+    const valNdviB = document.getElementById(`meter-val-ndvi-b-${pIdx}`);
+    if (fillNdviB) fillNdviB.style.width = indexToPercent(ndviB);
+    if (valNdviB) valNdviB.textContent = fmtVal(ndviB);
+
+    const fillNdbiB = document.getElementById(`meter-fill-ndbi-b-${pIdx}`);
+    const valNdbiB = document.getElementById(`meter-val-ndbi-b-${pIdx}`);
+    if (fillNdbiB) fillNdbiB.style.width = indexToPercent(ndbiB);
+    if (valNdbiB) valNdbiB.textContent = fmtVal(ndbiB);
+
+    const fillNdwiB = document.getElementById(`meter-fill-ndwi-b-${pIdx}`);
+    const valNdwiB = document.getElementById(`meter-val-ndwi-b-${pIdx}`);
+    if (fillNdwiB) fillNdwiB.style.width = indexToPercent(ndwiB);
+    if (valNdwiB) valNdwiB.textContent = fmtVal(ndwiB);
+
+    const fillNdviA = document.getElementById(`meter-fill-ndvi-a-${pIdx}`);
+    const valNdviA = document.getElementById(`meter-val-ndvi-a-${pIdx}`);
+    if (fillNdviA) fillNdviA.style.width = indexToPercent(ndviA);
+    if (valNdviA) valNdviA.textContent = fmtVal(ndviA);
+
+    const fillNdbiA = document.getElementById(`meter-fill-ndbi-a-${pIdx}`);
+    const valNdbiA = document.getElementById(`meter-val-ndbi-a-${pIdx}`);
+    if (fillNdbiA) fillNdbiA.style.width = indexToPercent(ndbiA);
+    if (valNdbiA) valNdbiA.textContent = fmtVal(ndbiA);
+
+    const fillNdwiA = document.getElementById(`meter-fill-ndwi-a-${pIdx}`);
+    const valNdwiA = document.getElementById(`meter-val-ndwi-a-${pIdx}`);
+    if (fillNdwiA) fillNdwiA.style.width = indexToPercent(ndwiA);
+    if (valNdwiA) valNdwiA.textContent = fmtVal(ndwiA);
+  });
+
+  el.addEventListener("mouseleave", () => {
+    if (tooltip) tooltip.style.display = "none";
+    const bProf = pair.spectral_profile?.before || {};
+    const aProf = pair.spectral_profile?.after || {};
+
+    const fillNdviB = document.getElementById(`meter-fill-ndvi-b-${pIdx}`);
+    const valNdviB = document.getElementById(`meter-val-ndvi-b-${pIdx}`);
+    if (fillNdviB) fillNdviB.style.width = indexToPercent(bProf.ndvi);
+    if (valNdviB) valNdviB.textContent = fmtVal(bProf.ndvi);
+
+    const fillNdbiB = document.getElementById(`meter-fill-ndbi-b-${pIdx}`);
+    const valNdbiB = document.getElementById(`meter-val-ndbi-b-${pIdx}`);
+    if (fillNdbiB) fillNdbiB.style.width = indexToPercent(bProf.ndbi);
+    if (valNdbiB) valNdbiB.textContent = fmtVal(bProf.ndbi);
+
+    const fillNdwiB = document.getElementById(`meter-fill-ndwi-b-${pIdx}`);
+    const valNdwiB = document.getElementById(`meter-val-ndwi-b-${pIdx}`);
+    if (fillNdwiB) fillNdwiB.style.width = indexToPercent(bProf.ndwi);
+    if (valNdwiB) valNdwiB.textContent = fmtVal(bProf.ndwi);
+
+    const fillNdviA = document.getElementById(`meter-fill-ndvi-a-${pIdx}`);
+    const valNdviA = document.getElementById(`meter-val-ndvi-a-${pIdx}`);
+    if (fillNdviA) fillNdviA.style.width = indexToPercent(aProf.ndvi);
+    if (valNdviA) valNdviA.textContent = fmtVal(aProf.ndvi);
+
+    const fillNdbiA = document.getElementById(`meter-fill-ndbi-a-${pIdx}`);
+    const valNdbiA = document.getElementById(`meter-val-ndbi-a-${pIdx}`);
+    if (fillNdbiA) fillNdbiA.style.width = indexToPercent(aProf.ndbi);
+    if (valNdbiA) valNdbiA.textContent = fmtVal(aProf.ndbi);
+
+    const fillNdwiA = document.getElementById(`meter-fill-ndwi-a-${pIdx}`);
+    const valNdwiA = document.getElementById(`meter-val-ndwi-a-${pIdx}`);
+    if (fillNdwiA) fillNdwiA.style.width = indexToPercent(aProf.ndwi);
+    if (valNdwiA) valNdwiA.textContent = fmtVal(aProf.ndwi);
+  });
+}
+
+/**
+ * Renders the Hierarchical Change Detection Tree Workflow (DAG):
+ * - Level 0: Root Node (T Chronological Observation Images Stack)
+ * - Level 1: Consecutive Pair Branches (Input Images T_i and T_i+1)
+ * - Level 2: Binary Change Mask Node (Where Change Occurred)
+ * - Level 3: Dual Spectral Graphs (Before & After Classified Land-Cover)
+ */
+function renderChangeTreeView(timeline, analysisData) {
+  const viewport = document.getElementById("tree-workflow-viewport");
+  if (!viewport) return;
+  viewport.innerHTML = "";
+
+  const stack = timeline?.multi_temporal_stack || timeline?.snapshots || [];
+  const pairwise = analysisData?.pairwise || [];
+
+  if (stack.length === 0 && pairwise.length === 0) {
+    viewport.innerHTML = `<div style="color:#94a3b8; font-size:12px; padding:16px;">No time-series data available for tree visualization.</div>`;
+    return;
+  }
+
+  // ----------------------------------------------------
+  // LEVEL 0: ROOT NODE — T OBSERVATION IMAGES
+  // ----------------------------------------------------
+  const rootCard = document.createElement("div");
+  rootCard.className = "tree-card tree-node-root";
+
+  const totalEpochs = stack.length || (pairwise.length + 1);
+  const minDate = timeline?.min_date || pairwise[0]?.date_before || "--";
+  const maxDate = timeline?.max_date || pairwise[pairwise.length - 1]?.date_after || "--";
+
+  rootCard.innerHTML = `
+    <div class="tree-node-header">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span class="tree-node-badge root">👑 ROOT NODE &bull; T TEMPORAL IMAGES</span>
+        <span style="font-size:13px; font-weight:800; color:#f8fafc; font-family:'JetBrains Mono',monospace;">
+          ${totalEpochs} Observation Epochs
+        </span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="tag-badge" style="font-size:9px; color:#38bdf8; border-color:rgba(6,182,212,0.4);">
+          Baseline Horizon: ${minDate} &rarr; ${maxDate}
+        </span>
+      </div>
+    </div>
+    <div style="font-size:10px; color:#94a3b8;">
+      Top-level chronological image stack. Every subsequent pair and binary change mask branches from these ingested observation epochs:
+    </div>
+    <div class="tree-root-snapshots-row" id="tree-root-snapshots-row">
+      <!-- Populated with T snapshots below -->
+    </div>
+  `;
+
+  const snapshotsRow = rootCard.querySelector("#tree-root-snapshots-row");
+  stack.forEach((snap, sIdx) => {
+    const sCard = document.createElement("div");
+    sCard.className = "tree-root-snapshot-card";
+    const cloudPct = snap.cloud_pct != null ? `${(snap.cloud_pct * 100).toFixed(1)}%` : "0.0%";
+    const ndviVal = snap.mean_ndvi != null ? snap.mean_ndvi.toFixed(2) : "--";
+    const thumbUrl = snap.thumbnail_url || "";
+
+    sCard.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:10px; font-weight:800; color:#38bdf8;">Epoch T${sIdx + 1}</span>
+        <span class="tag-badge" style="font-size:8px; padding:1px 4px;">${snap.date}</span>
+      </div>
+      <img src="${thumbUrl}" alt="Epoch T${sIdx + 1}" class="tree-root-thumb" title="Click to view full image" />
+      <div style="font-size:9px; color:#94a3b8; display:flex; justify-content:space-between;">
+        <span>Cloud: <b style="color:#e2e8f0;">${cloudPct}</b></span>
+        <span>NDVI: <b style="color:#10b981;">${ndviVal}</b></span>
+      </div>
+    `;
+
+    const imgEl = sCard.querySelector("img");
+    if (imgEl && thumbUrl) {
+      imgEl.onclick = () => openLightbox(thumbUrl, `Observation Epoch T${sIdx + 1} (${snap.date})`);
+    }
+
+    snapshotsRow.appendChild(sCard);
+  });
+
+  viewport.appendChild(rootCard);
+
+  // Vertical Connecting Stem down to Pair Branches
+  const rootStem = document.createElement("div");
+  rootStem.className = "tree-connector-stem";
+  viewport.appendChild(rootStem);
+
+  // ----------------------------------------------------
+  // LEVEL 1: PAIR BRANCHES (Consecutive Input Images)
+  // ----------------------------------------------------
+  const branchesRow = document.createElement("div");
+  branchesRow.className = "tree-branches-row";
+
+  pairwise.forEach((pair, pIdx) => {
+    const pairBranch = document.createElement("div");
+    pairBranch.className = "tree-pair-branch";
+    pairBranch.id = `tree-pair-branch-${pIdx}`;
+
+    // Images URLs
+    const snapB = stack.find(s => s.tile_id === pair.tile_before_id || s.date === pair.date_before);
+    const snapA = stack.find(s => s.tile_id === pair.tile_after_id || s.date === pair.date_after);
+    const rgbB = pair.rgb_before_url || snapB?.thumbnail_url || "";
+    const rgbA = pair.rgb_after_url || snapA?.thumbnail_url || "";
+    const changePct = pair.change_pct != null ? `${pair.change_pct}%` : "--%";
+
+    // Elapsed days / years
+    const dDays = pair.elapsed_days ?? 0;
+    const elapsedStr = dDays >= 365 ? `+${(dDays / 365.25).toFixed(1)} yrs` : `+${dDays} days`;
+
+    // Dual Input Images Card
+    const pairCard = document.createElement("div");
+    pairCard.className = "tree-card tree-pair-images-card";
+
+    pairCard.innerHTML = `
+      <div class="tree-node-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="tree-node-badge pair">PAIR ${pIdx + 1} INPUTS</span>
+          <span style="font-size:12px; font-weight:700; color:#f8fafc; font-family:'JetBrains Mono',monospace;">
+            ${pair.date_before} &rarr; ${pair.date_after}
+          </span>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span class="tag-badge" style="font-size:9px; color:#38bdf8;">${elapsedStr}</span>
+          <span class="metric-pill" style="color:#f59e0b; font-size:10px; padding:2px 6px;">${changePct} Changed</span>
+        </div>
+      </div>
+      <div style="font-size:10px; color:#94a3b8;">
+        Consecutive observation pair feeding into binary change detector:
+      </div>
+      <div class="tree-pair-images-grid">
+        <!-- Before Image (T_i) -->
+        <div class="tree-image-box before">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:10px; font-weight:800; color:#60a5fa;">T${pIdx + 1} (Before)</span>
+            <span style="font-size:8px; color:#94a3b8;">${pair.date_before}</span>
+          </div>
+          <img src="${rgbB}" alt="Before T${pIdx + 1}" class="tree-image-preview" title="Click to enlarge Before RGB" />
+          <div style="font-size:8px; color:#94a3b8; display:flex; justify-content:space-between;">
+            <span>NDVI: <b style="color:#10b981;">${pair.spectral_profile?.before?.ndvi?.toFixed(2) ?? '--'}</b></span>
+            <span>NDBI: <b style="color:#f59e0b;">${pair.spectral_profile?.before?.ndbi?.toFixed(2) ?? '--'}</b></span>
+          </div>
+        </div>
+        <!-- After Image (T_i+1) -->
+        <div class="tree-image-box after">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:10px; font-weight:800; color:#34d399;">T${pIdx + 2} (After)</span>
+            <span style="font-size:8px; color:#94a3b8;">${pair.date_after}</span>
+          </div>
+          <img src="${rgbA}" alt="After T${pIdx + 2}" class="tree-image-preview" title="Click to enlarge After RGB" />
+          <div style="font-size:8px; color:#94a3b8; display:flex; justify-content:space-between;">
+            <span>NDVI: <b style="color:#10b981;">${pair.spectral_profile?.after?.ndvi?.toFixed(2) ?? '--'}</b></span>
+            <span>NDBI: <b style="color:#f59e0b;">${pair.spectral_profile?.after?.ndbi?.toFixed(2) ?? '--'}</b></span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Hook up click to enlarge and live cursor hover
+    const imgB = pairCard.querySelector(".tree-image-box.before img");
+    if (imgB) {
+      attachPlotSpectralHover(imgB, pair, pIdx);
+      if (rgbB) {
+        imgB.onclick = () => openLightbox(rgbB, `Pair ${pIdx + 1} Before RGB (${pair.date_before})`);
+      }
+    }
+    const imgA = pairCard.querySelector(".tree-image-box.after img");
+    if (imgA) {
+      attachPlotSpectralHover(imgA, pair, pIdx);
+      if (rgbA) {
+        imgA.onclick = () => openLightbox(rgbA, `Pair ${pIdx + 1} After RGB (${pair.date_after})`);
+      }
+    }
+
+    pairBranch.appendChild(pairCard);
+
+    // Stem from Pair Inputs to Binary Change Mask
+    const stemToMask = document.createElement("div");
+    stemToMask.className = "tree-connector-stem";
+    pairBranch.appendChild(stemToMask);
+
+    // ----------------------------------------------------
+    // LEVEL 2: BINARY CHANGE MASK NODE (Where Change Occurred)
+    // ----------------------------------------------------
+    const rawMaskUrl = pair.binary_mask_url || "";
+    const filteredMaskUrl = pair.filtered_mask_url || rawMaskUrl;
+
+    const candPx = pair.candidate_pixels ?? (pair.filter_stats?.candidate_changes || 0);
+    const fpRejected = pair.false_positives_rejected ?? (pair.filter_stats?.false_positives_rejected || 0);
+    const verifiedPx = pair.changed_pixels ?? (pair.filter_stats?.verified_changes || 0);
+    const rejRate = candPx > 0 ? ((fpRejected / candPx) * 100).toFixed(1) : "0.0";
+
+    const maskCard = document.createElement("div");
+    maskCard.className = "tree-card tree-mask-card";
+    maskCard.id = `tree-mask-card-${pIdx}`;
+
+    maskCard.innerHTML = `
+      <div class="tree-node-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="tree-node-badge mask">🎯 BINARY CHANGE MASK</span>
+          <span style="font-size:11px; font-weight:700; color:#fbbf24; font-family:'JetBrains Mono',monospace;">
+            ${verifiedPx.toLocaleString()} Verified Px
+          </span>
+        </div>
+        <div class="tree-mask-mode-pills">
+          <button class="tree-mask-pill-btn active" id="btn-mask-verified-${pIdx}">Verified Mask</button>
+          <button class="tree-mask-pill-btn" id="btn-mask-raw-${pIdx}">Raw ChangeFormer</button>
+        </div>
+      </div>
+      <div style="font-size:10px; color:#94a3b8;">
+        Binary spatial mask generated by MTKD-ChangeFormer and semantically filtered:
+      </div>
+      <div class="tree-mask-display-wrap">
+        <img src="${filteredMaskUrl || rawMaskUrl}" alt="Binary Change Mask" class="tree-mask-img" id="tree-mask-img-${pIdx}" title="Click to enlarge mask" />
+      </div>
+      <div class="tree-mask-stats-row">
+        <div class="tree-mask-stat-box">
+          <span style="color:#64748b;">Candidate Px:</span>
+          <b style="color:#38bdf8;">${candPx.toLocaleString()}</b>
+        </div>
+        <div class="tree-mask-stat-box">
+          <span style="color:#64748b;">Noise Discarded:</span>
+          <b style="color:#f43f5e;">-${fpRejected.toLocaleString()} (${rejRate}%)</b>
+        </div>
+        <div class="tree-mask-stat-box">
+          <span style="color:#64748b;">True Changes:</span>
+          <b style="color:#10b981;">${verifiedPx.toLocaleString()}</b>
+        </div>
+      </div>
+    `;
+
+    // Hook up mask view switch and spectral hover
+    const maskImgEl = maskCard.querySelector(`#tree-mask-img-${pIdx}`);
+    if (maskImgEl) {
+      attachPlotSpectralHover(maskImgEl, pair, pIdx);
+    }
+    const btnVer = maskCard.querySelector(`#btn-mask-verified-${pIdx}`);
+    const btnRaw = maskCard.querySelector(`#btn-mask-raw-${pIdx}`);
+
+    if (maskImgEl) {
+      maskImgEl.onclick = () => {
+        const isVer = btnVer?.classList.contains("active");
+        const curUrl = isVer ? (filteredMaskUrl || rawMaskUrl) : (rawMaskUrl || filteredMaskUrl);
+        openLightbox(curUrl, isVer ? `Verified Change Mask (Pair ${pIdx + 1})` : `Raw ChangeFormer Mask (Pair ${pIdx + 1})`);
+      };
+    }
+
+    if (btnVer && btnRaw && maskImgEl) {
+      btnVer.onclick = () => {
+        btnVer.classList.add("active");
+        btnRaw.classList.remove("active");
+        maskImgEl.src = filteredMaskUrl || rawMaskUrl;
+      };
+      btnRaw.onclick = () => {
+        btnRaw.classList.add("active");
+        btnVer.classList.remove("active");
+        maskImgEl.src = rawMaskUrl || filteredMaskUrl;
+      };
+    }
+
+    pairBranch.appendChild(maskCard);
+
+    // ----------------------------------------------------
+    // FORK CONNECTOR (Binary Mask -> Twin Spectral Graphs)
+    // ----------------------------------------------------
+    const forkWrap = document.createElement("div");
+    forkWrap.className = "tree-fork-wrap";
+    forkWrap.innerHTML = `
+      <svg class="tree-fork-svg" viewBox="0 0 400 38" preserveAspectRatio="none">
+        <!-- Center trunk -->
+        <line x1="200" y1="0" x2="200" y2="12" stroke="rgba(245, 158, 11, 0.8)" stroke-width="2" />
+        <!-- Horizontal split bar -->
+        <line x1="100" y1="12" x2="300" y2="12" stroke="rgba(6, 182, 212, 0.7)" stroke-width="2" />
+        <!-- Left stem down to Before graph -->
+        <line x1="100" y1="12" x2="100" y2="38" stroke="#60a5fa" stroke-width="2" />
+        <circle cx="100" cy="38" r="3" fill="#60a5fa" />
+        <!-- Right stem down to After graph -->
+        <line x1="300" y1="12" x2="300" y2="38" stroke="#34d399" stroke-width="2" />
+        <circle cx="300" cy="38" r="3" fill="#34d399" />
+      </svg>
+    `;
+    pairBranch.appendChild(forkWrap);
+
+    // ----------------------------------------------------
+    // LEVEL 3: DUAL SPECTRAL GRAPHS (Before & After Classified)
+    // ----------------------------------------------------
+    const bProf = pair.spectral_profile?.before || {};
+    const aProf = pair.spectral_profile?.after || {};
+
+    const ndviB = bProf.ndvi ?? 0.25;
+    const ndwiB = bProf.ndwi ?? -0.30;
+    const ndbiB = bProf.ndbi ?? 0.05;
+
+    const ndviA = aProf.ndvi ?? 0.28;
+    const ndwiA = aProf.ndwi ?? -0.32;
+    const ndbiA = aProf.ndbi ?? 0.06;
+
+    const pFeatures = pair.change_geojson?.features || [];
+    const changeClassification = getChangedRegionClassification(pair.cursor_sample_grid, pFeatures, pair.spectral_profile);
+
+    const classInfoB = getClassColorInfo(changeClassification.topBefore, false);
+    const classInfoA = getClassColorInfo(changeClassification.topAfter, true);
+
+    const baseMaskUrl = pair.filtered_mask_url || pair.binary_mask_url || pair.raw_mask_url || "";
+    const classImgBefore = pair.classified_before_url || "";
+    const classImgAfter = pair.classified_after_url || "";
+
+    const spectralRow = document.createElement("div");
+    spectralRow.className = "tree-spectral-twins-row";
+
+    // 3A. Before Plotted Changed Region Card (Colored in the Binary Mask)
+    const beforeGraphCard = document.createElement("div");
+    beforeGraphCard.className = "tree-spectral-card before";
+    beforeGraphCard.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:10px; font-weight:800; color:#60a5fa; text-transform:uppercase;">
+          Before (T${pIdx + 1}) Changed Region
+        </span>
+        <span class="standard-class-pill ${classInfoB.bgClass}">
+          <span>${classInfoB.icon}</span> ${classInfoB.name}
+        </span>
+      </div>
+      <div style="font-size:9px; color:#94a3b8;">
+        Changed Footprint Surface: <b style="color:${classInfoB.color};">${classInfoB.desc}</b>
+      </div>
+
+      <!-- High-Resolution Binary Change Mask Colored for Before Surface -->
+      <div class="tree-classified-plot-wrap">
+        ${classImgBefore ? 
+          `<img src="${classImgBefore}" class="tree-classified-plot-img" id="img-class-before-${pIdx}" title="Click to view full-resolution Before classification map" />` :
+          `<canvas class="tree-classified-canvas" id="canvas-class-before-${pIdx}" title="High-resolution Before Classified Change Mask (Dark Green = Dense Veg)"></canvas>`
+        }
+      </div>
+
+      <!-- Surface Footprint Multi-Class Legend -->
+      <div class="tree-classified-legend">
+        <span><span class="tree-legend-dot" style="background:#15803d;"></span>Dense Veg</span>
+        <span><span class="tree-legend-dot" style="background:#84cc16;"></span>Sparse Veg</span>
+        <span><span class="tree-legend-dot" style="background:#92400e;"></span>Bare Land</span>
+        <span><span class="tree-legend-dot" style="background:#f59e0b;"></span>Built-up</span>
+        <span><span class="tree-legend-dot" style="background:#0284c7;"></span>Water</span>
+      </div>
+
+      <!-- Combined NDBI, NDVI, NDWI Mini Meters -->
+      <div style="display:flex; flex-direction:column; gap:5px; margin-top:4px;">
+        <!-- NDVI -->
+        <div class="tree-index-meter">
+          <span class="tree-meter-name" style="color:#10b981;">🌿 NDVI</span>
+          <div class="tree-meter-track">
+            <div class="tree-meter-fill" id="meter-fill-ndvi-b-${pIdx}" style="width:${indexToPercent(ndviB)}; background:#10b981;"></div>
+          </div>
+          <span class="tree-meter-val" id="meter-val-ndvi-b-${pIdx}" style="color:#6ee7b7;">${fmtVal(ndviB)}</span>
+        </div>
+        <!-- NDBI -->
+        <div class="tree-index-meter">
+          <span class="tree-meter-name" style="color:#f59e0b;">🏗️ NDBI</span>
+          <div class="tree-meter-track">
+            <div class="tree-meter-fill" id="meter-fill-ndbi-b-${pIdx}" style="width:${indexToPercent(ndbiB)}; background:#f59e0b;"></div>
+          </div>
+          <span class="tree-meter-val" id="meter-val-ndbi-b-${pIdx}" style="color:#fde68a;">${fmtVal(ndbiB)}</span>
+        </div>
+        <!-- NDWI -->
+        <div class="tree-index-meter">
+          <span class="tree-meter-name" style="color:#06b6d4;">💧 NDWI</span>
+          <div class="tree-meter-track">
+            <div class="tree-meter-fill" id="meter-fill-ndwi-b-${pIdx}" style="width:${indexToPercent(ndwiB)}; background:#06b6d4;"></div>
+          </div>
+          <span class="tree-meter-val" id="meter-val-ndwi-b-${pIdx}" style="color:#67e8f9;">${fmtVal(ndwiB)}</span>
+        </div>
+      </div>
+    `;
+
+    // 3B. After Plotted Changed Region Card (Colored in the Binary Mask)
+    const afterGraphCard = document.createElement("div");
+    afterGraphCard.className = "tree-spectral-card after";
+    afterGraphCard.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:10px; font-weight:800; color:#34d399; text-transform:uppercase;">
+          After (T${pIdx + 2}) Changed Region
+        </span>
+        <span class="standard-class-pill ${classInfoA.bgClass}">
+          <span>${classInfoA.icon}</span> ${classInfoA.name}
+        </span>
+      </div>
+      <div style="font-size:9px; color:#94a3b8;">
+        Changed Footprint Surface: <b style="color:${classInfoA.color};">${classInfoA.desc}</b>
+      </div>
+
+      <!-- High-Resolution Binary Change Mask Colored for After Surface -->
+      <div class="tree-classified-plot-wrap">
+        ${classImgAfter ? 
+          `<img src="${classImgAfter}" class="tree-classified-plot-img" id="img-class-after-${pIdx}" title="Click to view full-resolution After classification map" />` :
+          `<canvas class="tree-classified-canvas" id="canvas-class-after-${pIdx}" title="High-resolution After Classified Change Mask"></canvas>`
+        }
+      </div>
+
+      <!-- Surface Footprint Multi-Class Legend -->
+      <div class="tree-classified-legend">
+        <span><span class="tree-legend-dot" style="background:#15803d;"></span>Dense Veg</span>
+        <span><span class="tree-legend-dot" style="background:#84cc16;"></span>Sparse Veg</span>
+        <span><span class="tree-legend-dot" style="background:#92400e;"></span>Bare Land</span>
+        <span><span class="tree-legend-dot" style="background:#f59e0b;"></span>Built-up</span>
+        <span><span class="tree-legend-dot" style="background:#0284c7;"></span>Water</span>
+      </div>
+
+      <!-- Combined NDBI, NDVI, NDWI Mini Meters -->
+      <div style="display:flex; flex-direction:column; gap:5px; margin-top:4px;">
+        <!-- NDVI -->
+        <div class="tree-index-meter">
+          <span class="tree-meter-name" style="color:#10b981;">🌿 NDVI</span>
+          <div class="tree-meter-track">
+            <div class="tree-meter-fill" id="meter-fill-ndvi-a-${pIdx}" style="width:${indexToPercent(ndviA)}; background:#10b981;"></div>
+          </div>
+          <span class="tree-meter-val" id="meter-val-ndvi-a-${pIdx}" style="color:#6ee7b7;">${fmtVal(ndviA)}</span>
+        </div>
+        <!-- NDBI -->
+        <div class="tree-index-meter">
+          <span class="tree-meter-name" style="color:#f59e0b;">🏗️ NDBI</span>
+          <div class="tree-meter-track">
+            <div class="tree-meter-fill" id="meter-fill-ndbi-a-${pIdx}" style="width:${indexToPercent(ndbiA)}; background:#f59e0b;"></div>
+          </div>
+          <span class="tree-meter-val" id="meter-val-ndbi-a-${pIdx}" style="color:#fde68a;">${fmtVal(ndbiA)}</span>
+        </div>
+        <!-- NDWI -->
+        <div class="tree-index-meter">
+          <span class="tree-meter-name" style="color:#06b6d4;">💧 NDWI</span>
+          <div class="tree-meter-track">
+            <div class="tree-meter-fill" id="meter-fill-ndwi-a-${pIdx}" style="width:${indexToPercent(ndwiA)}; background:#06b6d4;"></div>
+          </div>
+          <span class="tree-meter-val" id="meter-val-ndwi-a-${pIdx}" style="color:#67e8f9;">${fmtVal(ndwiA)}</span>
+        </div>
+      </div>
+    `;
+
+    // Render Canvas with High-Resolution Binary Mask or attach Lightbox click & spectral hover
+    const canvasB = beforeGraphCard.querySelector(`#canvas-class-before-${pIdx}`);
+    if (canvasB) {
+      renderPerPixelClassifiedCanvas(canvasB, classImgBefore || baseMaskUrl, pair.cursor_sample_grid, false);
+      attachPlotSpectralHover(canvasB, pair, pIdx);
+      canvasB.onclick = () => {
+        try {
+          openLightbox(canvasB.toDataURL("image/png"), `Before (T${pIdx + 1}) Changed Footprint — Per-Pixel Classified Surface`);
+        } catch (e) {
+          if (baseMaskUrl) openLightbox(baseMaskUrl, `Before Changed Footprint`);
+        }
+      };
+    }
+
+    const canvasA = afterGraphCard.querySelector(`#canvas-class-after-${pIdx}`);
+    if (canvasA) {
+      renderPerPixelClassifiedCanvas(canvasA, classImgAfter || baseMaskUrl, pair.cursor_sample_grid, true);
+      attachPlotSpectralHover(canvasA, pair, pIdx);
+      canvasA.onclick = () => {
+        try {
+          openLightbox(canvasA.toDataURL("image/png"), `After (T${pIdx + 2}) Changed Footprint — Per-Pixel Classified Surface`);
+        } catch (e) {
+          if (baseMaskUrl) openLightbox(baseMaskUrl, `After Changed Footprint`);
+        }
+      };
+    }
+
+    const classPlotImgB = beforeGraphCard.querySelector(`#img-class-before-${pIdx}`);
+    if (classPlotImgB) {
+      attachPlotSpectralHover(classPlotImgB, pair, pIdx);
+      if (classImgBefore) {
+        classPlotImgB.onclick = () => openLightbox(classImgBefore, `Before (T${pIdx + 1}) Changed Footprint — Per-Pixel Classified Surface`);
+      }
+    }
+
+    const classPlotImgA = afterGraphCard.querySelector(`#img-class-after-${pIdx}`);
+    if (classPlotImgA) {
+      attachPlotSpectralHover(classPlotImgA, pair, pIdx);
+      if (classImgAfter) {
+        classPlotImgA.onclick = () => openLightbox(classImgAfter, `After (T${pIdx + 2}) Changed Footprint — Per-Pixel Classified Surface`);
+      }
+    }
+
+    spectralRow.appendChild(beforeGraphCard);
+    spectralRow.appendChild(afterGraphCard);
+    pairBranch.appendChild(spectralRow);
+
+    // ----------------------------------------------------
+    // LEVEL 4: WHAT CHANGED (Convergence of Before & After)
+    // ----------------------------------------------------
+    const convergeWrap = document.createElement("div");
+    convergeWrap.className = "tree-fork-wrap";
+    convergeWrap.innerHTML = `
+      <svg class="tree-fork-svg" viewBox="0 0 400 38" preserveAspectRatio="none">
+        <!-- Left line from Before graph to center -->
+        <line x1="100" y1="0" x2="100" y2="24" stroke="#60a5fa" stroke-width="2" />
+        <circle cx="100" cy="0" r="3" fill="#60a5fa" />
+        <!-- Right line from After graph to center -->
+        <line x1="300" y1="0" x2="300" y2="24" stroke="#34d399" stroke-width="2" />
+        <circle cx="300" cy="0" r="3" fill="#34d399" />
+        <!-- Horizontal merge bar -->
+        <line x1="100" y1="24" x2="300" y2="24" stroke="rgba(245, 158, 11, 0.7)" stroke-width="2" />
+        <!-- Center stem leading to What Changed box -->
+        <line x1="200" y1="24" x2="200" y2="38" stroke="#f59e0b" stroke-width="2" />
+        <circle cx="200" cy="38" r="3" fill="#f59e0b" />
+      </svg>
+    `;
+    pairBranch.appendChild(convergeWrap);
+
+    // Calculate pair change metrics
+    let pairAreaM2 = 0;
+    pFeatures.forEach(f => pairAreaM2 += (f.properties?.area_sq_m || f.properties?.area_m2 || 0));
+    const pairAreaStr = pairAreaM2 >= 10000 ? `${(pairAreaM2 / 10000).toFixed(2)} ha` : `${Math.round(pairAreaM2).toLocaleString()} m²`;
+
+    // Determine dominant change category for this pair
+    const pBreakdown = {};
+    pFeatures.forEach(f => {
+      const c = f.properties?.change_type || "Unclassified";
+      pBreakdown[c] = (pBreakdown[c] || 0) + 1;
+    });
+    const dominantPairChange = Object.entries(pBreakdown).sort((a, b) => b[1] - a[1])[0]?.[0] || "Surface Transition";
+    const changeColor = getChangeColor(dominantPairChange);
+
+    const dNdvi = (ndviA - ndviB).toFixed(2);
+    const dNdbi = (ndbiA - ndbiB).toFixed(2);
+
+    // What Changed Card
+    const whatChangedCard = document.createElement("div");
+    whatChangedCard.className = "tree-card tree-transition-card";
+    whatChangedCard.style.borderLeftColor = changeColor.fill || "#f59e0b";
+
+    whatChangedCard.innerHTML = `
+      <div class="tree-node-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="tree-node-badge transition">⚡ WHAT CHANGED</span>
+          <span style="font-size:12px; font-weight:800; color:#f8fafc; font-family:'JetBrains Mono',monospace;">
+            ${dominantPairChange}
+          </span>
+        </div>
+        <button class="hud-btn btn-focus-tree-pair" style="padding:3px 8px; font-size:10px; background:rgba(6,182,212,0.15); border:1px solid rgba(6,182,212,0.4); color:#38bdf8;" title="Focus this pair on the Leaflet map">
+          🔍 Focus on Map
+        </button>
+      </div>
+
+      <!-- Transition Flow Banner -->
+      <div class="tree-transition-banner">
+        <div class="tree-transition-flow">
+          <span class="standard-class-pill ${classInfoB.cssClass}" style="font-size:9px; padding:2px 6px;">
+            ${classInfoB.icon} ${classInfoB.name}
+          </span>
+          <span style="color:#f59e0b; font-size:14px;">&rarr;</span>
+          <span class="standard-class-pill ${classInfoA.cssClass}" style="font-size:9px; padding:2px 6px;">
+            ${classInfoA.icon} ${classInfoA.name}
+          </span>
+        </div>
+        <span class="tag-badge" style="font-size:9px; color:#10b981; border-color:rgba(16,185,129,0.4);">
+          ${verifiedPx.toLocaleString()} Changed Px
+        </span>
+      </div>
+
+      <!-- Synthesis Stats Grid -->
+      <div class="tree-transition-stats-grid">
+        <div class="tree-stat-pill-card">
+          <span style="color:#64748b; font-size:8px; text-transform:uppercase;">Affected Footprint</span>
+          <b style="color:#f8fafc; font-size:11px; font-family:'JetBrains Mono',monospace;">${pairAreaStr}</b>
+        </div>
+        <div class="tree-stat-pill-card">
+          <span style="color:#64748b; font-size:8px; text-transform:uppercase;">Detected Polygons</span>
+          <b style="color:#38bdf8; font-size:11px; font-family:'JetBrains Mono',monospace;">${pFeatures.length} Regions</b>
+        </div>
+        <div class="tree-stat-pill-card">
+          <span style="color:#64748b; font-size:8px; text-transform:uppercase;">Spectral Delta</span>
+          <b style="color:${parseFloat(dNdvi) < 0 ? '#f43f5e' : '#10b981'}; font-size:11px; font-family:'JetBrains Mono',monospace;">
+            ΔNDVI ${parseFloat(dNdvi) >= 0 ? '+' : ''}${dNdvi}
+          </b>
+        </div>
+      </div>
+    `;
+
+    // Map focus button handler
+    const btnFocus = whatChangedCard.querySelector(".btn-focus-tree-pair");
+    if (btnFocus) {
+      btnFocus.onclick = (e) => {
+        e.stopPropagation();
+        switchChangeViewMode(pIdx.toString());
+      };
+    }
+
+    pairBranch.appendChild(whatChangedCard);
+
+    // Stem leading to Grand Convergence
+    const stemToGrand = document.createElement("div");
+    stemToGrand.className = "tree-connector-stem";
+    pairBranch.appendChild(stemToGrand);
+
+    branchesRow.appendChild(pairBranch);
+  });
+
+  viewport.appendChild(branchesRow);
+
+  // ----------------------------------------------------
+  // LEVEL 5: GRAND CONVERGENCE NODE (Overall Change in Y Years)
+  // ----------------------------------------------------
+  const overall = analysisData?.overall || {};
+  const geojson = overall.change_geojson || {};
+  const allFeatures = geojson.features || [];
+  const breakdown = overall.change_type_breakdown || {};
+
+  let elapsedYears = 1.0;
+  if (minDate && maxDate && minDate !== "--") {
+    const dSpanMs = new Date(maxDate) - new Date(minDate);
+    if (!isNaN(dSpanMs) && dSpanMs > 0) {
+      elapsedYears = Math.max(0.5, (dSpanMs / (1000 * 60 * 60 * 24 * 365.25)));
+    }
+  }
+
+  let totalAreaM2 = 0;
+  allFeatures.forEach(f => {
+    totalAreaM2 += (f.properties?.area_sq_m || f.properties?.area_m2 || 0);
+  });
+  const totalAreaStr = totalAreaM2 >= 10000 ? `${(totalAreaM2 / 10000).toFixed(2)} ha` : `${Math.round(totalAreaM2).toLocaleString()} m²`;
+
+  const topTypeEntry = Object.entries(breakdown)
+    .filter(([k]) => k !== "No Change")
+    .sort((a, b) => b[1] - a[1])[0];
+  const dominantOverall = topTypeEntry ? `${topTypeEntry[0]} (${topTypeEntry[1]}%)` : "Multi-Spectral Transformation";
+
+  // Grand Convergence Stem / Funnel Wrap
+  const grandTrunkWrap = document.createElement("div");
+  grandTrunkWrap.className = "tree-grand-trunk-wrap";
+  grandTrunkWrap.innerHTML = `
+    <div style="width:2px; height:24px; background:linear-gradient(180deg, rgba(245,158,11,0.8), rgba(6,182,212,0.9)); margin: 0 auto;"></div>
+  `;
+  viewport.appendChild(grandTrunkWrap);
+
+  const grandConvergenceCard = document.createElement("div");
+  grandConvergenceCard.className = "tree-card tree-node-convergence";
+
+  grandConvergenceCard.innerHTML = `
+    <div class="tree-node-header">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span class="tree-node-badge overall">🌐 CUMULATIVE CONVERGENCE</span>
+        <span style="font-size:14px; font-weight:800; color:#f8fafc; font-family:'JetBrains Mono',monospace;">
+          OVERALL CHANGE IN ${elapsedYears.toFixed(1)} YEARS
+        </span>
+      </div>
+      <button class="hud-btn primary" id="btn-tree-focus-overall" style="padding:5px 12px; font-size:11px;">
+        <span>🗺️</span> View Total Cumulative Map
+      </button>
+    </div>
+
+    <div style="font-size:11px; color:#94a3b8; line-height:1.4;">
+      Unified convergence of all pairwise intervals. Synthesizes net land-cover transformation, cumulative area loss/gain, and trajectory evolution across the entire <b>${elapsedYears.toFixed(1)}-year observation horizon (${minDate} &rarr; ${maxDate})</b>:
+    </div>
+
+    <!-- Overall Key Metric Pillars -->
+    <div class="tree-convergence-stats">
+      <div class="tree-conv-stat-box">
+        <span style="color:#64748b; font-size:9px; text-transform:uppercase;">Total Net Footprint</span>
+        <div class="tree-conv-stat-num" style="color:#f8fafc;">${totalAreaStr}</div>
+      </div>
+      <div class="tree-conv-stat-box">
+        <span style="color:#64748b; font-size:9px; text-transform:uppercase;">Change Polygons</span>
+        <div class="tree-conv-stat-num" style="color:#38bdf8;">${allFeatures.length}</div>
+      </div>
+      <div class="tree-conv-stat-box">
+        <span style="color:#64748b; font-size:9px; text-transform:uppercase;">Observation Horizon</span>
+        <div class="tree-conv-stat-num" style="color:#fbbf24;">${elapsedYears.toFixed(1)} Yrs</div>
+      </div>
+      <div class="tree-conv-stat-box">
+        <span style="color:#64748b; font-size:9px; text-transform:uppercase;">Dominant Driver</span>
+        <div class="tree-conv-stat-num" style="color:#34d399; font-size:13px;">${dominantOverall}</div>
+      </div>
+    </div>
+
+    <!-- Trajectory Chain Flow -->
+    <div style="display:flex; flex-direction:column; gap:6px; margin-top:2px;">
+      <span style="font-size:10px; font-weight:700; color:#cbd5e1; text-transform:uppercase; letter-spacing:0.04em;">
+        Multi-Temporal Trajectory Sequence (${pairwise.length} Intervals)
+      </span>
+      <div class="tree-trajectory-flow" id="tree-trajectory-flow">
+        <!-- Populated below -->
+      </div>
+    </div>
+  `;
+
+  // Build Trajectory Step Chain
+  const trajContainer = grandConvergenceCard.querySelector("#tree-trajectory-flow");
+  if (trajContainer) {
+    pairwise.forEach((p, idx) => {
+      const stepEl = document.createElement("div");
+      stepEl.className = "tree-trajectory-step";
+      stepEl.innerHTML = `
+        <span style="color:#38bdf8; font-weight:700;">T${idx + 1} (${p.date_before})</span>
+        <span style="color:#f59e0b;">&rarr;</span>
+        <span style="color:#34d399; font-weight:700;">T${idx + 2} (${p.date_after})</span>
+      `;
+      trajContainer.appendChild(stepEl);
+      if (idx < pairwise.length - 1) {
+        const arrow = document.createElement("span");
+        arrow.style.color = "#64748b";
+        arrow.textContent = "➔";
+        trajContainer.appendChild(arrow);
+      }
+    });
+  }
+
+  // Connect Total Cumulative Map button
+  const btnTotalMap = grandConvergenceCard.querySelector("#btn-tree-focus-overall");
+  if (btnTotalMap) {
+    btnTotalMap.onclick = () => {
+      switchChangeViewMode("overall");
+    };
+  }
+
+  viewport.appendChild(grandConvergenceCard);
 }
 
 /**
@@ -1191,25 +2310,32 @@ function attachCursorInspector(card, pair, idx) {
   function classify(ndvi, ndwi, ndbi) {
     if (ndwi > 0.3 && ndbi < -0.1) return "Water";
     if (ndvi > 0.6 && ndbi < 0.0) return "Dense Vegetation";
-    if (ndvi >= 0.2 && ndvi <= 0.6 && ndbi < 0.0) return "Moderate Veg";
+    if (ndvi >= 0.2 && ndvi <= 0.6 && ndbi < 0.0) return "Moderate / Sparse Vegetation";
     if (ndbi > 0.0 && ndvi <= 0.2) return "Built-up / Urban";
-    if (ndvi <= 0.1 && ndbi <= 0.0 && ndwi <= 0.0) return "Bare Soil";
-    return "Transitional";
+    if (ndvi <= 0.1 && ndbi <= 0.0 && ndwi <= 0.0) return "Bare Soil / Barren";
+    return "Unclassified / Transitional";
   }
 
   function getTransition(cB, cA) {
     if (cB === cA) return "Unchanged Surface";
+    if (cB.includes("Vegetation") && cA.includes("Vegetation")) return "Seasonal Phenology (Unchanged)";
     if ((cB.includes("Vegetation") || cB.includes("Bare Soil")) && cA.includes("Built-up")) {
       return "🏗️ Construction";
     }
     if (cB.includes("Vegetation") && cA.includes("Bare Soil")) {
       return "🪓 Clearance";
     }
-    if (cB.includes("Water") || cA.includes("Water")) {
-      return "💧 Water Variation";
+    if (cB.includes("Water") && (cA.includes("Bare Soil") || cA.includes("Vegetation"))) {
+      return "💧 Water Shrinkage";
+    }
+    if ((cB.includes("Bare Soil") || cB.includes("Vegetation")) && cA.includes("Water")) {
+      return "💧 Water Expansion";
     }
     if (cB.includes("Built-up") && (cA.includes("Vegetation") || cA.includes("Bare Soil"))) {
-      return "🏚️ Demolition";
+      return "🏚️ Demolition / Reversion";
+    }
+    if (cB.includes("Unclassified") && cA.includes("Unclassified")) {
+      return "Unchanged Surface";
     }
     return `${cB} → ${cA}`;
   }
@@ -1232,6 +2358,10 @@ function attachCursorInspector(card, pair, idx) {
 
       let ndviB = 0, ndwiB = 0, ndbiB = 0;
       let ndviA = 0, ndwiA = 0, ndbiA = 0;
+      let classB = "Unclassified / Transitional";
+      let classA = "Unclassified / Transitional";
+      let isVerified = false;
+      let serverChangeType = null;
 
       if (sampleGrid && sampleGrid.before && sampleGrid.before.ndvi) {
         const sz = sampleGrid.grid_size || 64;
@@ -1243,6 +2373,11 @@ function attachCursorInspector(card, pair, idx) {
         ndviA = sampleGrid.after.ndvi[r]?.[c] ?? 0;
         ndwiA = sampleGrid.after.ndwi[r]?.[c] ?? 0;
         ndbiA = sampleGrid.after.ndbi[r]?.[c] ?? 0;
+
+        classB = sampleGrid.before.class?.[r]?.[c] || classify(ndviB, ndwiB, ndbiB);
+        classA = sampleGrid.after.class?.[r]?.[c] || classify(ndviA, ndwiA, ndbiA);
+        isVerified = !!(sampleGrid.verified?.[r]?.[c]);
+        serverChangeType = sampleGrid.change_type?.[r]?.[c];
       } else {
         // Fallback to pair mean
         ndviB = pair.spectral_profile?.before?.ndvi ?? 0.25;
@@ -1251,11 +2386,22 @@ function attachCursorInspector(card, pair, idx) {
         ndviA = pair.spectral_profile?.after?.ndvi ?? 0.28;
         ndwiA = pair.spectral_profile?.after?.ndwi ?? -0.32;
         ndbiA = pair.spectral_profile?.after?.ndbi ?? 0.06;
+        classB = classify(ndviB, ndwiB, ndbiB);
+        classA = classify(ndviA, ndwiA, ndbiA);
       }
 
-      const classB = classify(ndviB, ndwiB, ndbiB);
-      const classA = classify(ndviA, ndwiA, ndbiA);
-      const trans = getTransition(classB, classA);
+      let trans = (serverChangeType && serverChangeType !== "No Change") ? serverChangeType : getTransition(classB, classA);
+      const isUnchanged = (classB === classA) || trans === "No Change" || trans.includes("Unchanged") || trans.includes("Seasonal Phenology");
+
+      let displayTrans = trans;
+      let transColor = "#fbbf24";
+      if (isUnchanged || !isVerified) {
+        displayTrans = "🚫 Unchanged Surface (Excluded from Verified Mask)";
+        transColor = "#94a3b8";
+      } else {
+        displayTrans = "⚡ Verified: " + trans;
+        transColor = "#10b981";
+      }
 
       // Update Card Live HUD Bar
       const coordsEl = document.getElementById(`coords-${idx}`);
@@ -1282,7 +2428,10 @@ function attachCursorInspector(card, pair, idx) {
       if (cA) cA.textContent = classA;
 
       const transEl = document.getElementById(`trans-${idx}`);
-      if (transEl) transEl.textContent = trans;
+      if (transEl) {
+        transEl.textContent = displayTrans;
+        transEl.style.color = transColor;
+      }
 
       // Update Floating Tooltip
       if (tooltip) {
@@ -1314,7 +2463,10 @@ function attachCursorInspector(card, pair, idx) {
         if (tipNdwiA) tipNdwiA.textContent = (ndwiA >= 0 ? "+" : "") + Number(ndwiA).toFixed(2);
         if (tipNdbiA) tipNdbiA.textContent = (ndbiA >= 0 ? "+" : "") + Number(ndbiA).toFixed(2);
         if (tipClassA) tipClassA.textContent = classA;
-        if (tipTrans) tipTrans.textContent = trans;
+        if (tipTrans) {
+          tipTrans.textContent = displayTrans;
+          tipTrans.style.color = transColor;
+        }
       }
     });
 

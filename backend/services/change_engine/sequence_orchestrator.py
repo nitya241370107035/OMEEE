@@ -29,6 +29,11 @@ from backend.services.change_engine.binary_change_adapter import (
 from backend.services.change_engine.spectral_classifier import (
     compute_spectral_indices,
     classify_pixels,
+    CLASS_WATER,
+    CLASS_DENSE_VEGETATION,
+    CLASS_MODERATE_VEGETATION,
+    CLASS_BUILT_UP,
+    CLASS_BARE_SOIL,
     CLASS_UNCLASSIFIED,
 )
 from backend.services.change_engine.semantic_change_filter import (
@@ -120,6 +125,66 @@ def mask_to_png_base64(mask: np.ndarray, color=(6, 182, 212), max_dim: int = 384
     rgba[bool_mask, 3] = 230
     rgba[~bool_mask, :3] = (11, 17, 32)
     rgba[~bool_mask, 3] = 200
+
+    img = Image.fromarray(rgba, mode="RGBA")
+    if h > max_dim or w > max_dim:
+        img = img.resize((max_dim, max_dim), Image.Resampling.NEAREST)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def classified_map_to_png_base64(
+    class_map: np.ndarray,
+    mask: np.ndarray,
+    max_dim: int = 384,
+) -> str:
+    """Renders a colorized classification map ONLY for the region where mask > 0.
+
+    User Color Mapping:
+    - Dense Vegetation: Dark Green (21, 128, 61) / #15803d
+    - Moderate / Sparse Veg: Light Green / Olive (132, 204, 22) / #84cc16
+    - Bare Soil / Barren Land: Earth Brown (146, 64, 14) / #92400e
+    - Built-up / Urban: Amber / Gold (245, 158, 11) / #f59e0b
+    - Water: Deep Blue (2, 132, 199) / #0284c7
+    - Unclassified: Slate (148, 163, 184)
+    - Outside Changed Mask: Muted Dark Background (7, 10, 18, 230)
+    """
+    h, w = class_map.shape
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+
+    # Background (unchanged pixels outside mask)
+    rgba[:, :, 0] = 7
+    rgba[:, :, 1] = 10
+    rgba[:, :, 2] = 18
+    rgba[:, :, 3] = 230
+
+    bool_mask = mask > 0
+
+    if np.any(bool_mask):
+        # 1. Dense Vegetation -> Dark Green
+        is_dense = bool_mask & (class_map == CLASS_DENSE_VEGETATION)
+        rgba[is_dense] = (21, 128, 61, 255)
+
+        # 2. Moderate / Sparse Veg -> Light Green
+        is_mod = bool_mask & (class_map == CLASS_MODERATE_VEGETATION)
+        rgba[is_mod] = (132, 204, 22, 255)
+
+        # 3. Bare Soil / Land -> Earth Brown
+        is_soil = bool_mask & (class_map == CLASS_BARE_SOIL)
+        rgba[is_soil] = (146, 64, 14, 255)
+
+        # 4. Built-up / Urban -> Amber / Gold
+        is_urban = bool_mask & (class_map == CLASS_BUILT_UP)
+        rgba[is_urban] = (245, 158, 11, 255)
+
+        # 5. Water -> Deep Blue
+        is_water = bool_mask & (class_map == CLASS_WATER)
+        rgba[is_water] = (2, 132, 199, 255)
+
+        # 6. Unclassified / Other -> Slate
+        is_unclass = bool_mask & (class_map == CLASS_UNCLASSIFIED)
+        rgba[is_unclass] = (148, 163, 184, 255)
 
     img = Image.fromarray(rgba, mode="RGBA")
     if h > max_dim or w > max_dim:
@@ -273,6 +338,11 @@ class SequenceOrchestrator:
         # Step 9: Transition Matrix Lookup
         change_type_map = vectorized_change_type_lookup(class_before_map, class_after_map)
 
+        # CRITICAL USER RULE: Any pixel where surface is unchanged (change_type == "No Change"
+        # or class_before_map == class_after_map) MUST BE STRICTLY REMOVED from the verified mask
+        is_unchanged_surface = (change_type_map == "No Change") | (class_before_map == class_after_map)
+        surviving_mask = surviving_mask & (~is_unchanged_surface)
+
         # Step 10: Vectorize to GeoJSON polygons with road morphology test & spectral sampling
         features = polygonize_change_mask(
             mask=surviving_mask,
@@ -311,15 +381,33 @@ class SequenceOrchestrator:
         }
 
         # Step 12: Generate Web-ready base64 PNG previews for all bands and masks
+        # CRITICAL USER REQUIREMENT:
+        # 1. "each pixel is coloued acc to the particular class it belon not just one colour for both after and before"
+        # 2. "and if both after and before have same colour pixel then remove that pixel as it represent no change"
+
+        # Strictly eliminate any pixel where class_before_map == class_after_map (no change)
+        is_same_pixel_class = (class_before_map == class_after_map)
+        surviving_mask = surviving_mask & (~is_same_pixel_class)
+
+        # Re-compute changed pixel metrics
+        changed_pixels = int(np.sum(surviving_mask))
+        change_pct = round(float((changed_pixels / total_pixels) * 100.0), 2)
+        cand_pixels = int(np.sum(candidate_binary_mask))
+        fp_rejected = cand_pixels - changed_pixels
+        filter_stats["verified_changes"] = changed_pixels
+        filter_stats["false_positives_rejected"] = fp_rejected
+
+        # Per-pixel colorized land-cover maps for Before and After
+        classified_b_png = classified_map_to_png_base64(class_before_map, mask=surviving_mask)
+        classified_a_png = classified_map_to_png_base64(class_after_map, mask=surviving_mask)
+
+        # Standard band previews
         rgb_b_png = rgb_to_png_base64(data_b["rgb"])
         rgb_a_png = rgb_to_png_base64(data_a["rgb"])
         ndvi_b_png = ndvi_to_png_base64(indices_b["ndvi"])
         ndvi_a_png = ndvi_to_png_base64(indices_a["ndvi"])
         raw_mask_png = mask_to_png_base64(candidate_binary_mask, color=(6, 182, 212))
         filtered_mask_png = mask_to_png_base64(surviving_mask, color=(245, 158, 11))
-
-        cand_pixels = int(np.sum(candidate_binary_mask))
-        fp_rejected = int(filter_stats.get("false_positives_rejected", 0))
 
         # Step 13: Sample 64x64 spatial index grid for live cursor hover inspection
         grid_step = max(1, h // 64)
@@ -332,6 +420,9 @@ class SequenceOrchestrator:
         ndwi_a_sample = np.round(indices_a["ndwi"][::grid_step, ::grid_step], 3).tolist()
         ndbi_a_sample = np.round(indices_a["ndbi"][::grid_step, ::grid_step], 3).tolist()
         class_a_sample = class_after_map[::grid_step, ::grid_step].tolist()
+
+        verified_sample = (surviving_mask[::grid_step, ::grid_step] > 0).astype(int).tolist()
+        change_type_sample = change_type_map[::grid_step, ::grid_step].tolist()
 
         cursor_sample_grid = {
             "grid_size": len(ndvi_b_sample),
@@ -346,7 +437,9 @@ class SequenceOrchestrator:
                 "ndwi": ndwi_a_sample,
                 "ndbi": ndbi_a_sample,
                 "class": class_a_sample,
-            }
+            },
+            "verified": verified_sample,
+            "change_type": change_type_sample,
         }
 
         return {
@@ -365,6 +458,8 @@ class SequenceOrchestrator:
             "ndvi_after_url": ndvi_a_png,
             "binary_mask_url": raw_mask_png,
             "filtered_mask_url": filtered_mask_png,
+            "classified_before_url": classified_b_png,
+            "classified_after_url": classified_a_png,
             "spectral_profile": spectral_profile,
             "cursor_sample_grid": cursor_sample_grid,
             "filter_stats": filter_stats,

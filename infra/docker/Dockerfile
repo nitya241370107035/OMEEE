@@ -24,7 +24,8 @@ WORKDIR /app
 COPY requirements.txt /app/
 RUN pip install --upgrade pip && \
     pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
-    pip install -r requirements.txt
+    pip install -r requirements.txt && \
+    (pip uninstall -y opencv-python 2>/dev/null || true)
 
 # Copy source repository
 COPY . /app/

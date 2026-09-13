@@ -121,4 +121,26 @@ def classify_pixels(
     result[mask5] = CLASS_BARE_SOIL
     unassigned[mask5] = False
 
+    # Priority 6: Dominant Relative Spectral Index (Eliminates arbitrary unclassified fallbacks)
+    if np.any(unassigned):
+        is_sec_water = unassigned & (ndwi > 0.15) & (ndwi > ndvi)
+        result[is_sec_water] = CLASS_WATER
+        unassigned[is_sec_water] = False
+
+        is_sec_dense = unassigned & (ndvi > 0.5)
+        result[is_sec_dense] = CLASS_DENSE_VEGETATION
+        unassigned[is_sec_dense] = False
+
+        is_sec_mod = unassigned & (ndvi >= 0.2) & (ndvi > ndbi)
+        result[is_sec_mod] = CLASS_MODERATE_VEGETATION
+        unassigned[is_sec_mod] = False
+
+        is_sec_built = unassigned & ((ndbi >= ndvi) | (ndbi >= 0.0))
+        result[is_sec_built] = CLASS_BUILT_UP
+        unassigned[is_sec_built] = False
+
+        # Remaining exposed non-vegetated surface is Bare Land / Soil
+        result[unassigned] = CLASS_BARE_SOIL
+        unassigned[:] = False
+
     return result

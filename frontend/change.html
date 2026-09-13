@@ -1396,6 +1396,675 @@
       border-radius: 4px;
       border: 1px solid;
     }
+
+    /* ============================================================
+       PHASE 1: CHANGE DETECTION TREE WORKFLOW STYLES
+       ============================================================ */
+    .tree-view-toggle-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      background: rgba(13, 18, 31, 0.6);
+      padding: 4px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      width: fit-content;
+    }
+
+    .tree-toggle-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: #94a3b8;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+    }
+
+    .tree-toggle-btn:hover {
+      color: #f1f5f9;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .tree-toggle-btn.active {
+      background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(99, 102, 241, 0.25));
+      border-color: rgba(6, 182, 212, 0.5);
+      color: #38bdf8;
+      box-shadow: 0 0 12px rgba(6, 182, 212, 0.2);
+    }
+
+    .tree-workflow-viewport {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      position: relative;
+      padding: 8px 0 20px 0;
+    }
+
+    /* Tree Node Base Card */
+    .tree-card {
+      background: rgba(13, 20, 36, 0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6);
+      transition: all 0.25s ease;
+      position: relative;
+    }
+
+    .tree-card:hover {
+      border-color: rgba(56, 189, 248, 0.45);
+      box-shadow: 0 12px 36px rgba(6, 182, 212, 0.22);
+    }
+
+    /* Level 0: Root Node (T Images) */
+    .tree-node-root {
+      width: 100%;
+      max-width: 900px;
+      border-color: rgba(6, 182, 212, 0.4);
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.95), rgba(8, 14, 28, 0.92));
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .tree-node-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 8px;
+    }
+
+    .tree-node-badge {
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .tree-node-badge.root {
+      background: rgba(6, 182, 212, 0.15);
+      border: 1px solid rgba(6, 182, 212, 0.4);
+      color: #38bdf8;
+    }
+
+    .tree-node-badge.pair {
+      background: rgba(99, 102, 241, 0.15);
+      border: 1px solid rgba(99, 102, 241, 0.4);
+      color: #818cf8;
+    }
+
+    .tree-root-snapshots-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      overflow-x: auto;
+      padding: 4px 0 8px 0;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(6, 182, 212, 0.3) transparent;
+    }
+
+    .tree-root-snapshot-card {
+      flex: 0 0 160px;
+      background: rgba(7, 10, 18, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: all 0.2s ease;
+    }
+
+    .tree-root-snapshot-card:hover {
+      border-color: rgba(56, 189, 248, 0.6);
+      transform: translateY(-2px);
+    }
+
+    .tree-root-thumb {
+      width: 100%;
+      height: 90px;
+      object-fit: cover;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    /* Vertical SVG / Stem Connectors */
+    .tree-connector-stem {
+      width: 2px;
+      height: 36px;
+      background: linear-gradient(180deg, rgba(6, 182, 212, 0.8), rgba(99, 102, 241, 0.8));
+      margin: 0 auto;
+      position: relative;
+    }
+
+    .tree-connector-stem::after {
+      content: '';
+      position: absolute;
+      bottom: -4px;
+      left: -3px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #818cf8;
+      box-shadow: 0 0 8px #818cf8;
+    }
+
+    /* Tree Branching Row (Pairs Level) */
+    .tree-branches-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 24px;
+      width: 100%;
+      overflow-x: auto;
+      padding: 8px 4px;
+      scrollbar-width: thin;
+    }
+
+    .tree-pair-branch {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex: 1 1 480px;
+      max-width: 580px;
+      min-width: 360px;
+    }
+
+    /* Level 1: Pair Input Images Card */
+    .tree-pair-images-card {
+      width: 100%;
+      border-color: rgba(99, 102, 241, 0.35);
+      background: rgba(11, 16, 30, 0.95);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .tree-pair-images-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .tree-image-box {
+      background: rgba(7, 10, 18, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      position: relative;
+    }
+
+    .tree-image-box.before {
+      border-left: 3px solid #60a5fa;
+    }
+
+    .tree-image-box.after {
+      border-left: 3px solid #34d399;
+    }
+
+    .tree-image-preview {
+      width: 100%;
+      height: 120px;
+      object-fit: cover;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      cursor: crosshair;
+    }
+
+    /* ============================================================
+       PHASE 2: BINARY CHANGE MASK & DUAL SPECTRAL GRAPHS STYLES
+       ============================================================ */
+    .tree-node-badge.mask {
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      color: #fbbf24;
+    }
+
+    .tree-node-badge.spectral {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #34d399;
+    }
+
+    /* Level 2: Binary Change Mask Node */
+    .tree-mask-card {
+      width: 100%;
+      border-color: rgba(245, 158, 11, 0.35);
+      background: rgba(11, 16, 30, 0.95);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .tree-mask-display-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      background: rgba(7, 10, 18, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 10px;
+      position: relative;
+    }
+
+    .tree-mask-img {
+      width: 100%;
+      max-height: 180px;
+      object-fit: contain;
+      border-radius: 6px;
+      border: 1px solid rgba(245, 158, 11, 0.25);
+      background: #030712;
+      cursor: crosshair;
+      transition: all 0.2s ease;
+    }
+
+    .tree-mask-img:hover {
+      border-color: #f59e0b;
+      box-shadow: 0 0 16px rgba(245, 158, 11, 0.3);
+    }
+
+    .tree-mask-mode-pills {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .tree-mask-pill-btn {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #94a3b8;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .tree-mask-pill-btn.active {
+      background: rgba(245, 158, 11, 0.2);
+      border-color: #f59e0b;
+      color: #fbbf24;
+    }
+
+    .tree-mask-stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      text-align: center;
+    }
+
+    .tree-mask-stat-box {
+      background: rgba(13, 18, 31, 0.7);
+      padding: 6px 4px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    /* Fork Connector (1 Parent -> 2 Children) */
+    .tree-fork-wrap {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      margin: 2px 0;
+    }
+
+    .tree-fork-svg {
+      width: 100%;
+      height: 38px;
+      overflow: visible;
+    }
+
+    /* Level 3: Dual Spectral Graphs Row (Before & After) */
+    .tree-spectral-twins-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      width: 100%;
+    }
+
+    .tree-spectral-card {
+      background: rgba(11, 16, 30, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .tree-spectral-card.before {
+      border-color: rgba(96, 165, 250, 0.35);
+      background: linear-gradient(180deg, rgba(13, 22, 45, 0.95), rgba(7, 12, 26, 0.95));
+    }
+
+    .tree-spectral-card.after {
+      border-color: rgba(52, 211, 153, 0.35);
+      background: linear-gradient(180deg, rgba(10, 31, 30, 0.95), rgba(6, 18, 19, 0.95));
+    }
+
+    .tree-spectral-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    }
+
+    .tree-spectral-card.before:hover {
+      border-color: #60a5fa;
+    }
+
+    .tree-spectral-card.after:hover {
+      border-color: #34d399;
+    }
+
+    .standard-class-pill {
+      font-size: 10px;
+      font-weight: 800;
+      padding: 4px 8px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      letter-spacing: 0.04em;
+    }
+
+    .class-dense-veg {
+      background: rgba(16, 185, 129, 0.2);
+      border: 1px solid #10b981;
+      color: #6ee7b7;
+    }
+
+    .class-mod-veg {
+      background: rgba(52, 211, 153, 0.15);
+      border: 1px solid #34d399;
+      color: #a7f3d0;
+    }
+
+    .class-built-up {
+      background: rgba(245, 158, 11, 0.2);
+      border: 1px solid #f59e0b;
+      color: #fde68a;
+    }
+
+    .class-water {
+      background: rgba(6, 182, 212, 0.2);
+      border: 1px solid #06b6d4;
+      color: #67e8f9;
+    }
+
+    .class-bare-soil {
+      background: rgba(251, 146, 60, 0.2);
+      border: 1px solid #fb923c;
+      color: #fed7aa;
+    }
+
+    .class-transitional {
+      background: rgba(148, 163, 184, 0.15);
+      border: 1px solid #94a3b8;
+      color: #cbd5e1;
+    }
+
+    /* Plotted Classified Region Map Styles (User Specified) */
+    .tree-classified-plot-wrap {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: #070a12;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 8px;
+      position: relative;
+    }
+
+    .tree-classified-plot-img {
+      width: 100%;
+      max-height: 160px;
+      aspect-ratio: 1;
+      object-fit: contain;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: #0b1120;
+      cursor: crosshair;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .tree-classified-plot-img:hover {
+      transform: scale(1.02);
+      box-shadow: 0 0 12px rgba(255, 255, 255, 0.15);
+    }
+
+    .tree-classified-canvas {
+      width: 100%;
+      max-height: 160px;
+      aspect-ratio: 1;
+      object-fit: contain;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: #0b1120;
+      cursor: crosshair;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .tree-classified-canvas:hover {
+      transform: scale(1.02);
+      box-shadow: 0 0 12px rgba(255, 255, 255, 0.15);
+    }
+
+    .tree-classified-legend {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 8px;
+      color: #94a3b8;
+      margin-top: 4px;
+    }
+
+    .tree-legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 2px;
+    }
+
+    /* Mini Index Meter inside Spectral Cards */
+    .tree-index-meter {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 9px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .tree-meter-name {
+      width: 48px;
+      color: #94a3b8;
+    }
+
+    .tree-meter-track {
+      flex: 1;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .tree-meter-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.35s ease;
+    }
+
+    .tree-meter-val {
+      width: 38px;
+      text-align: right;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+
+    /* ============================================================
+       PHASE 3: "WHAT CHANGED" SYNTHESIS & OVERALL Y YEARS STYLES
+       ============================================================ */
+    .tree-node-badge.transition {
+      background: rgba(245, 158, 11, 0.2);
+      border: 1px solid #f59e0b;
+      color: #fbbf24;
+    }
+
+    .tree-node-badge.overall {
+      background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(99, 102, 241, 0.25));
+      border: 1px solid #38bdf8;
+      color: #38bdf8;
+      box-shadow: 0 0 10px rgba(6, 182, 212, 0.25);
+    }
+
+    /* Level 4: "What Changed" Synthesis Card */
+    .tree-transition-card {
+      width: 100%;
+      border-color: rgba(245, 158, 11, 0.4);
+      background: linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(9, 14, 26, 0.96));
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      border-left: 4px solid #f59e0b;
+    }
+
+    .tree-transition-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(7, 10, 18, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 8px 12px;
+      gap: 8px;
+    }
+
+    .tree-transition-flow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .tree-transition-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      font-size: 10px;
+    }
+
+    .tree-stat-pill-card {
+      background: rgba(13, 18, 31, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 6px;
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    /* Level 5: Grand Convergence Node (Overall Change in Y Years) */
+    .tree-grand-trunk-wrap {
+      width: 100%;
+      max-width: 960px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      margin: 4px 0 0 0;
+    }
+
+    .tree-node-convergence {
+      width: 100%;
+      max-width: 900px;
+      border-color: rgba(6, 182, 212, 0.5);
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(8, 14, 28, 0.96));
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7), 0 0 24px rgba(6, 182, 212, 0.15);
+      border-top: 3px solid #38bdf8;
+    }
+
+    .tree-convergence-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+
+    .tree-conv-stat-box {
+      background: rgba(7, 10, 18, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 8px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .tree-conv-stat-num {
+      font-size: 16px;
+      font-weight: 800;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .tree-trajectory-flow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 6px 0;
+    }
+
+    .tree-trajectory-step {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(13, 18, 31, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+    }
   </style>
 </head>
 <body>
@@ -1746,19 +2415,43 @@
                 </div>
               </div>
 
-              <!-- Year-Wise Changes & Binary Mask Gallery -->
+              <!-- Year-Wise Changes: Tree Workflow & Multi-Band Gallery -->
               <div class="breakdown-card" id="yearwise-masks-card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
                   <span style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.05em;">
-                    <span>🛰️</span> Year-Wise Changes & Binary Masks
+                    <span>🛰️</span> Multi-Temporal Change Pipeline Architecture
                   </span>
                   <span style="font-size:10px; color:#94a3b8;" id="mask-gallery-count-lbl">-- intervals</span>
                 </div>
-                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 8px;">
-                  For each consecutive interval: Before RGB, After RGB, Raw ChangeFormer Binary Mask (where), and Semantically Filtered Change Mask (what):
+
+                <!-- View Switcher Tabs -->
+                <div class="tree-view-toggle-bar">
+                  <button class="tree-toggle-btn active" id="btn-toggle-tree-view">
+                    <span>🌳</span> Change Tree Workflow (DAG)
+                  </button>
+                  <button class="tree-toggle-btn" id="btn-toggle-matrix-view">
+                    <span>🗂️</span> Multi-Band Matrix Grid
+                  </button>
                 </div>
-                <div style="display:flex; flex-direction:column; gap:10px;" id="yearwise-masks-container">
-                  <!-- Dynamically populated year-wise mask quad cards -->
+
+                <!-- 1. Tree Workflow DAG View (Phase 1 active) -->
+                <div id="change-tree-container" style="display: block;">
+                  <div style="font-size: 10px; color: #94a3b8; margin-bottom: 12px; line-height: 1.4;">
+                    Hierarchical Directed Graph: Root node contains all $T$ chronological observation epochs. Consecutive pairs branch into input dual-image nodes:
+                  </div>
+                  <div class="tree-workflow-viewport" id="tree-workflow-viewport">
+                    <!-- Dynamically populated by renderChangeTreeView() -->
+                  </div>
+                </div>
+
+                <!-- 2. Traditional Multi-Band Matrix View -->
+                <div id="change-matrix-container" style="display: none;">
+                  <div style="font-size: 10px; color: #94a3b8; margin-bottom: 8px;">
+                    For each consecutive interval: Before RGB, After RGB, Raw ChangeFormer Binary Mask (where), and Semantically Filtered Change Mask (what):
+                  </div>
+                  <div style="display:flex; flex-direction:column; gap:10px;" id="yearwise-masks-container">
+                    <!-- Dynamically populated year-wise mask quad cards -->
+                  </div>
                 </div>
               </div>
 
@@ -1872,6 +2565,6 @@
   </div>
 
   <!-- Dedicated Studio Controller -->
-  <script src="/frontend/change.js?v=20260910_v10"></script>
+  <script src="/frontend/change.js?v=20260913_tree_v7"></script>
 </body>
 </html>

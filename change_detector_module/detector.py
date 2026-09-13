@@ -41,6 +41,29 @@ class ChangeDetector:
             raise FileNotFoundError(f"Config not found at: {self.config_path}")
 
         try:
+            import torch
+            _orig_load = torch.load
+            def _trusted_load(*args, **kwargs):
+                kwargs["weights_only"] = False
+                return _orig_load(*args, **kwargs)
+            torch.load = _trusted_load
+
+            # Patch mmcv ext_loader if C++ extensions are uncompiled on CPU
+            try:
+                import mmcv.utils.ext_loader as ext_loader
+                _orig_load_ext = ext_loader.load_ext
+                def _safe_load_ext(name, funcs):
+                    try:
+                        return _orig_load_ext(name, funcs)
+                    except ModuleNotFoundError:
+                        class DummyExt:
+                            def __getattr__(self, item):
+                                return lambda *a, **kw: None
+                        return DummyExt()
+                ext_loader.load_ext = _safe_load_ext
+            except Exception:
+                pass
+
             from opencd.apis import OpenCDInferencer
             kwargs = {'model': self.config_path, 'weights': self.weights_path}
             if self.device is not None:

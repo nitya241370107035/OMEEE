@@ -34,6 +34,14 @@ def lookup_change_type(before_class: str, after_class: str) -> str:
     if before_class == after_class:
         return "No Change"
 
+    # Intra-vegetation shifts (Dense <-> Moderate) are seasonal phenology
+    if before_class in VEGETATION_CLASSES and after_class in VEGETATION_CLASSES:
+        return "No Change"
+
+    # Both unclassified / transitional is No Change
+    if before_class == CLASS_UNCLASSIFIED and after_class == CLASS_UNCLASSIFIED:
+        return "No Change"
+
     # Construction: Vegetation -> Built-up or Bare Soil -> Built-up
     if (before_class in VEGETATION_CLASSES or before_class == CLASS_BARE_SOIL) and after_class == CLASS_BUILT_UP:
         return TYPE_CONSTRUCTION
@@ -54,7 +62,21 @@ def lookup_change_type(before_class: str, after_class: str) -> str:
     if before_class == CLASS_BUILT_UP and (after_class in VEGETATION_CLASSES or after_class == CLASS_BARE_SOIL):
         return TYPE_DEMOLITION
 
-    return TYPE_UNCLASSIFIED
+    # Re-vegetation / Greening: Bare Soil -> Vegetation
+    if before_class == CLASS_BARE_SOIL and after_class in VEGETATION_CLASSES:
+        return "Re-vegetation / Greening"
+
+    # Contextual assignment for any mixed/transitional shifts
+    if after_class == CLASS_BUILT_UP:
+        return TYPE_CONSTRUCTION
+    if after_class == CLASS_BARE_SOIL:
+        return TYPE_CLEARANCE
+    if after_class in VEGETATION_CLASSES:
+        return "Re-vegetation / Greening"
+    if after_class == CLASS_WATER:
+        return TYPE_WATER_EXPANSION
+
+    return "Surface Transformation"
 
 
 def vectorized_change_type_lookup(
@@ -65,7 +87,7 @@ def vectorized_change_type_lookup(
     before = np.asarray(before_classes, dtype=object)
     after = np.asarray(after_classes, dtype=object)
 
-    output = np.full(before.shape, TYPE_UNCLASSIFIED, dtype=object)
+    output = np.full(before.shape, "Surface Transformation", dtype=object)
 
     is_veg_before = (before == CLASS_DENSE_VEGETATION) | (before == CLASS_MODERATE_VEGETATION)
     is_veg_after = (after == CLASS_DENSE_VEGETATION) | (after == CLASS_MODERATE_VEGETATION)
@@ -75,12 +97,17 @@ def vectorized_change_type_lookup(
     is_bare_after = after == CLASS_BARE_SOIL
     is_water_before = before == CLASS_WATER
     is_water_after = after == CLASS_WATER
+    is_unclass_before = before == CLASS_UNCLASSIFIED
+    is_unclass_after = after == CLASS_UNCLASSIFIED
 
     # Construction
     output[(is_veg_before | is_bare_before) & is_built_after] = TYPE_CONSTRUCTION
 
     # Clearance
     output[is_veg_before & is_bare_after] = TYPE_CLEARANCE
+
+    # Re-vegetation / Greening
+    output[is_bare_before & is_veg_after] = "Re-vegetation / Greening"
 
     # Water Shrinkage
     output[is_water_before & (is_bare_after | is_veg_after)] = TYPE_WATER_SHRINKAGE
@@ -91,7 +118,21 @@ def vectorized_change_type_lookup(
     # Demolition
     output[is_built_before & (is_veg_after | is_bare_after)] = TYPE_DEMOLITION
 
+    # Intra-vegetation seasonal shifts are No Change
+    output[is_veg_before & is_veg_after] = "No Change"
+
+    # Both unclassified / transitional is No Change
+    output[is_unclass_before & is_unclass_after] = "No Change"
+
     # Identical classes remain No Change
+    output[before == after] = "No Change"
+
+    # Contextual assignment for remaining active transitions
+    is_still_generic = (output == "Surface Transformation") & (before != after)
+    output[is_still_generic & is_built_after] = TYPE_CONSTRUCTION
+    output[is_still_generic & is_bare_after] = TYPE_CLEARANCE
+    output[is_still_generic & is_veg_after] = "Re-vegetation / Greening"
+    output[is_still_generic & is_water_after] = TYPE_WATER_EXPANSION
     output[before == after] = "No Change"
 
     return output

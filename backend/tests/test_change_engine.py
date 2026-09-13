@@ -103,6 +103,34 @@ class TestSemanticFilter:
         assert stats["false_positives_rejected"] == 1
         assert stats["verified_changes"] == 1
 
+    def test_unchanged_surface_and_phenology_removed_from_verified_mask(self):
+        """Unchanged surface (before == after, intra-veg phenology, both unclassified) must be strictly discarded."""
+        before = np.array([
+            CLASS_BUILT_UP,            # unchanged
+            CLASS_DENSE_VEGETATION,    # intra-veg phenology
+            CLASS_UNCLASSIFIED,        # both unclassified
+            CLASS_BARE_SOIL,           # real change
+        ])
+        after = np.array([
+            CLASS_BUILT_UP,
+            CLASS_MODERATE_VEGETATION,
+            CLASS_UNCLASSIFIED,
+            CLASS_BUILT_UP,
+        ])
+        binary_mask = np.ones(4, dtype=np.uint8)
+
+        surviving, stats = filter_semantic_changes(before, after, binary_mask)
+        # Built-up -> Built-up: rejected
+        assert surviving[0] == False
+        # Dense Veg -> Moderate Veg: rejected as seasonal phenology
+        assert surviving[1] == False
+        # Unclassified -> Unclassified: rejected as unchanged
+        assert surviving[2] == False
+        # Bare Soil -> Built-up: kept as real Construction
+        assert surviving[3] == True
+        assert stats["false_positives_rejected"] == 3
+        assert stats["verified_changes"] == 1
+
 
 class TestChangeTypeRules:
     def test_transitions(self):

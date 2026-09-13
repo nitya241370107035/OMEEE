@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eo_password}
       POSTGRES_DB: ${POSTGRES_DB:-eo_archive}
     ports:
-      - "${POSTGRES_PORT:-5434}:5432"
+      - "${POSTGRES_PORT:-5482}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../backend/db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
@@ -76,7 +76,7 @@ services:
       - MINIO_SECRET_KEY=eo_password
       - PORT=8000
     ports:
-      - "${PORT:-8080}:8000"
+      - "${PORT:-3000}:8000"
     volumes:
       - ../data:/app/data
       - ../models:/app/models
