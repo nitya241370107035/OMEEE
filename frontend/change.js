@@ -7,6 +7,19 @@ document.addEventListener("DOMContentLoaded", () => {
   initChangeStudio();
 });
 
+function indexToPercent(val) {
+  if (val == null || isNaN(val)) return "50%";
+  const clamped = Math.max(-1, Math.min(1, Number(val)));
+  return `${Math.round(((clamped + 1) / 2) * 100)}%`;
+}
+window.indexToPercent = indexToPercent;
+
+function fmtVal(val) {
+  if (val == null || isNaN(val)) return "--";
+  return (val >= 0 ? "+" : "") + Number(val).toFixed(2);
+}
+window.fmtVal = fmtVal;
+
 let changeMap = null;
 let gridLayer = null;
 let currentSelectedLayer = null;
@@ -165,38 +178,51 @@ function setupLightboxControls() {
 
 function formatBoxItem(b) {
   const type = b.change_type || "Construction";
+  const transition = b.transition_label || (
+    type.includes("Road") ? "Vegetation → Road" :
+    type.includes("Clearance") ? "Vegetation → Ground" :
+    type.includes("Water") ? (type.includes("shrink") ? "Water → Land (Shrinkage)" : "Land → Water (Extension)") :
+    type.includes("Demolition") ? "Built-up → Ground" :
+    type.includes("Shift") ? "Vegetation Shift (Large Scale)" :
+    "Vegetation → Built-up"
+  );
 
   // Color scheme (user specified):
   //   Built-up / Construction  → reddish (#ef4444)
-  //   Land Clearance           → light yellow (#fde047)
-  //   Road Development         → purple   (#a855f7)  [unchanged]
-  //   Water Variation          → cyan     (#06b6d4)  [unchanged]
-  //   Demolition / Reversion   → orange   (#fb923c)  [unchanged]
+  //   Land Clearance / Ground  → light yellow (#fde047)
+  //   Water Variation / Ext.   → bright blue (#38bdf8 / #06b6d4)
+  //   Road Development         → purple (#a855f7)
+  //   Demolition / Reversion   → orange (#fb923c)
+  //   Vegetation Shift         → emerald green (#10b981)
   let color    = "#ef4444";
   let fillColor = "rgba(239, 68, 68, 0.22)";
-  let shortType = "Build";
+  let shortType = "Vegetation → Built-up";
 
-  if (type.includes("Road")) {
+  if (type.includes("Road") || transition.includes("Road")) {
     color     = "#a855f7";
     fillColor = "rgba(168, 85, 247, 0.22)";
-    shortType = "Road";
-  } else if (type.includes("Clearance")) {
-    // Land clearance → light yellow
+    shortType = "Vegetation → Road";
+  } else if (type.includes("Clearance") || (transition.includes("Ground") && !transition.includes("Built-up"))) {
+    // Land clearance / bare ground → light yellow
     color     = "#fde047";
     fillColor = "rgba(253, 224, 71, 0.22)";
-    shortType = "Land";
-  } else if (type.includes("Water")) {
-    color     = "#06b6d4";
-    fillColor = "rgba(6, 182, 212, 0.22)";
-    shortType = "Water";
-  } else if (type.includes("Demolition")) {
+    shortType = "Vegetation → Ground";
+  } else if (type.includes("Water") || transition.includes("Water")) {
+    color     = "#38bdf8";
+    fillColor = "rgba(56, 189, 248, 0.25)";
+    shortType = transition.includes("Shrink") ? "Water → Land" : "Land → Water";
+  } else if (type.includes("Demolition") || transition.includes("Demolition")) {
     color     = "#fb923c";
     fillColor = "rgba(251, 146, 60, 0.22)";
-    shortType = "Demo";
+    shortType = "Built-up → Ground";
+  } else if (type.includes("Vegetation") && type.includes("Shift")) {
+    color     = "#10b981";
+    fillColor = "rgba(16, 185, 129, 0.22)";
+    shortType = "Vegetation Shift";
   } else if (type.includes("Unclassified")) {
     color     = "#6366f1";
     fillColor = "rgba(99, 102, 241, 0.22)";
-    shortType = "Other";
+    shortType = "Unclassified";
   }
   // Default (Construction) uses the reddish color set at top
 
@@ -206,80 +232,411 @@ function formatBoxItem(b) {
     color,
     fillColor,
     shortType,
+    transition_label: transition,
     box_pct: box,
-    area_m2: b.area_m2 || 0
+    area_m2: b.area_m2 || 0,
+    proof: b.proof || null,
   };
 }
 
 
+/**
+ * Standard 6-Class Spectral Land-Cover Classifier:
+ * 1. 💧 Water: NDVI -0.50 to 0.20, NDWI 0.20 to 1.00, NDBI -1.00 to -0.10
+ * 2. 🌳 Dense vegetation: NDVI 0.50 to 0.90+, NDWI -0.60 to 0.10, NDBI -0.60 to -0.10
+ * 3. 🌱 Sparse vegetation: NDVI 0.20 to <0.50, NDWI -0.50 to 0.10, NDBI -0.40 to 0.10
+ * 4. 🏢 Built-up: NDVI -0.10 to 0.30, NDWI -0.50 to 0.10, NDBI >= 0.15 to 0.50
+ * 5. 🟤 Bare soil / open land: NDVI -0.20 to <0.20, NDWI -0.50 to 0.10, NDBI -0.20 to <0.00
+ * 6. ⚠️ Built-up / Bare-land confusion: NDVI -0.10 to 0.20, NDWI -0.50 to 0.10, NDBI 0.00 to <0.15
+ */
+function classifySpectralLandCover(ndvi, ndwi, ndbi) {
+  const vNdvi = Number(ndvi ?? 0);
+  const vNdwi = Number(ndwi ?? 0);
+  const vNdbi = Number(ndbi ?? 0);
+
+  // 1. Water
+  if (vNdwi >= 0.20 && vNdbi <= -0.10 && vNdvi >= -0.50 && vNdvi <= 0.20) {
+    return "Water";
+  }
+  // 2. Dense vegetation
+  if (vNdvi >= 0.50 && vNdwi >= -0.60 && vNdwi <= 0.10 && vNdbi <= -0.10) {
+    return "Dense Vegetation";
+  }
+  // 3. Sparse vegetation
+  if (vNdvi >= 0.20 && vNdvi < 0.50 && vNdwi >= -0.50 && vNdwi <= 0.10 && vNdbi >= -0.40 && vNdbi <= 0.10) {
+    return "Sparse Vegetation";
+  }
+  // 4. Built-up
+  if (vNdvi >= -0.10 && vNdvi <= 0.30 && vNdwi >= -0.50 && vNdwi <= 0.10 && vNdbi >= 0.15) {
+    return "Built-up";
+  }
+  // 5. Bare soil / open land
+  if (vNdvi >= -0.20 && vNdvi < 0.20 && vNdwi >= -0.50 && vNdwi <= 0.10 && vNdbi >= -0.20 && vNdbi < 0.00) {
+    return "Bare Soil / Open Land";
+  }
+  // 6. Built-up / Bare-land confusion
+  if (vNdvi >= -0.10 && vNdvi <= 0.20 && vNdwi >= -0.50 && vNdwi <= 0.10 && vNdbi >= 0.00 && vNdbi < 0.15) {
+    return "Built-up / Bare-land Confusion";
+  }
+
+  // Fallback for residual out-of-box values
+  if (vNdwi >= 0.20 || (vNdwi > 0.05 && vNdvi < -0.10) || (vNdvi < 0.00 && vNdwi > -0.10 && vNdbi < 0.10)) return "Water";
+  if (vNdvi >= 0.50) return "Dense Vegetation";
+  if (vNdvi >= 0.20 && vNdvi > vNdbi) return "Sparse Vegetation";
+  if (vNdbi >= 0.15) return "Built-up";
+  if (vNdbi < 0.00 && vNdvi < 0.20) return "Bare Soil / Open Land";
+  return "Built-up / Bare-land Confusion";
+}
+
+function getSpectralTransition(cB, cA) {
+  if (cB === cA) return "Unchanged Surface";
+  if (cB.includes("Water") && cA.includes("Water")) return "Unchanged Surface (Water Body)";
+  if (cB.includes("Vegetation") && cA.includes("Vegetation")) return "Seasonal Phenology (Unchanged)";
+
+  // Ambiguous / Confusion zone transitions (suppressed)
+  if (cB.includes("Confusion") || cA.includes("Confusion")) {
+    return "⚠️ Ambiguous (Built-up / Bare-land Confusion)";
+  }
+
+  if ((cB.includes("Bare Soil") || cB.includes("Land")) && cA.includes("Vegetation")) {
+    return "🌱 Seasonal Greening (Normal Land)";
+  }
+  if ((cB.includes("Vegetation") || cB.includes("Bare Soil") || cB.includes("Land")) && cA.includes("Built-up")) {
+    return "🏗️ Construction";
+  }
+  if (cB.includes("Vegetation") && (cA.includes("Bare Soil") || cA.includes("Land"))) {
+    return "🪓 Clearance";
+  }
+  if (cB.includes("Water") && (cA.includes("Bare Soil") || cA.includes("Land") || cA.includes("Built-up"))) {
+    return "💧 Water Shrinkage";
+  }
+  if (cA.includes("Water") && (cB.includes("Bare Soil") || cB.includes("Land") || cB.includes("Vegetation") || cB.includes("Built-up"))) {
+    return "💧 Water Expansion";
+  }
+  if (cB.includes("Built-up") && (cA.includes("Vegetation") || cA.includes("Bare Soil") || cA.includes("Land"))) {
+    return "🏚️ Demolition / Reversion";
+  }
+  return `${cB} → ${cA}`;
+}
+
 function getMajorChangeBoxes(pair) {
   if (!pair) return [];
   if (pair.change_boxes && pair.change_boxes.length > 0) {
-    return pair.change_boxes.map(b => formatBoxItem(b));
+    return pair.change_boxes
+      .filter(b => {
+        const type = (b.change_type || "").toLowerCase();
+        const trans = (b.transition_label || "").toLowerCase();
+
+        // 1. Discard false demolition where Before was actually normal land
+        if (type.includes("demo") || trans.includes("built-up → ground")) {
+          const bProf = b.spectral_profile?.before || pair.spectral_profile?.before;
+          if (bProf && (bProf.ndvi != null && bProf.ndvi >= 0.10)) {
+            return false;
+          }
+          if (bProf && (bProf.ndbi < 0.10 || (bProf.ndvi != null && bProf.ndvi >= bProf.ndbi))) {
+            return false;
+          }
+          const bCls = (b.before_class || "").toLowerCase();
+          if (bCls.includes("soil") || bCls.includes("ground") || bCls.includes("barren") || bCls.includes("land")) {
+            return false;
+          }
+        }
+
+        // 2. Discard false construction / road where After is actually WATER!
+        if (type.includes("construct") || type.includes("road") || trans.includes("built-up") || trans.includes("road")) {
+          const bCls = (b.before_class || "").toLowerCase();
+          const aCls = (b.after_class || "").toLowerCase();
+          if (bCls.includes("water") && aCls.includes("water")) return false;
+          if (aCls.includes("water")) return false;
+
+          let aNdwi = b.spectral_profile?.after?.ndwi;
+          let aNdvi = b.spectral_profile?.after?.ndvi;
+          if (aNdwi == null && pair.cursor_sample_grid?.after?.ndwi && b.box_pct) {
+            const sz = pair.cursor_sample_grid.grid_size || 64;
+            const midR = Math.min(sz - 1, Math.max(0, Math.floor(((b.box_pct.y + b.box_pct.h / 2) / 100) * sz)));
+            const midC = Math.min(sz - 1, Math.max(0, Math.floor(((b.box_pct.x + b.box_pct.w / 2) / 100) * sz)));
+            aNdwi = pair.cursor_sample_grid.after.ndwi[midR]?.[midC];
+            aNdvi = pair.cursor_sample_grid.after.ndvi[midR]?.[midC];
+          }
+          if (aNdwi != null && aNdwi > 0.15) return false;
+        }
+
+        return true;
+      })
+      .map(b => formatBoxItem(b))
+      .sort((a, b) => (b.area_m2 || 0) - (a.area_m2 || 0))
+      .slice(0, 8);
   }
+
   const features = pair.change_geojson?.features || [];
-  const majorTypes = [
-    "Construction",
-    "Road Development",
-    "Clearance",
-    "Water-Extent Variation (shrinkage)",
-    "Water-Extent Variation (expansion)",
-    "Demolition / Reversion"
-  ];
   const boxes = [];
-  features.forEach((f, idx) => {
-    const p = f.properties || {};
-    const type = p.change_type;
-    if (!majorTypes.includes(type)) return;
-    
-    let boxPct = p.box_pct;
-    if (boxPct) {
-      boxes.push(formatBoxItem({
-        id: idx + 1,
-        change_type: type,
-        area_m2: p.area_sq_m || p.area_m2 || 0,
-        box_pct: boxPct
+
+  if (features.length > 0) {
+    // 1. Calculate site coordinate bounding envelope across all features
+    let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+    features.forEach(f => {
+      const coords = f.geometry?.coordinates;
+      function extractCoords(arr) {
+        if (!arr || !arr.length) return;
+        if (typeof arr[0] === "number") {
+          const lon = arr[0], lat = arr[1];
+          if (lon < minLon) minLon = lon;
+          if (lon > maxLon) maxLon = lon;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
+        } else {
+          for (let i = 0; i < arr.length; i++) extractCoords(arr[i]);
+        }
+      }
+      extractCoords(coords);
+    });
+
+    const lonSpan = Math.max(maxLon - minLon, 0.0001);
+    const latSpan = Math.max(maxLat - minLat, 0.0001);
+
+    const majorTypes = [
+      "Construction",
+      "Road Development",
+      "Clearance",
+      "Water-Extent Variation (shrinkage)",
+      "Water-Extent Variation (expansion)",
+      "Water Extension",
+      "Demolition / Reversion",
+      "Vegetation Shift (Large Scale)"
+    ];
+
+    features.forEach((f, idx) => {
+      const p = f.properties || {};
+      const type = p.change_type || "";
+      const bCls = p.before_class || "";
+      const aCls = p.after_class || "";
+      const area = p.area_sq_m || p.area_m2 || 0;
+
+      // Filter: Major changes only (Anthropogenic structural transitions)
+      const isMajor = majorTypes.includes(type) ||
+        type.includes("Construct") || type.includes("Road") || type.includes("Clear") ||
+        type.includes("Water") || type.includes("Demo") ||
+        (bCls !== aCls && area >= 1500) ||
+        (bCls === aCls && bCls.includes("Veg") && area >= 50000);
+
+      if (!isMajor || type === "No Change") return;
+
+      // Discard false demolition if baseline was normal land
+      if (type.includes("Demo") || (p.transition_label && p.transition_label.includes("Built-up → Ground"))) {
+        if (bCls && (bCls.includes("Soil") || bCls.includes("Ground") || bCls.includes("Barren") || bCls.includes("Land"))) return;
+        const bProf = p.spectral_profile?.before || pair.spectral_profile?.before;
+        if (bProf && (bProf.ndvi != null && bProf.ndvi >= 0.10)) return;
+        if (bProf && (bProf.ndbi < 0.10 || (bProf.ndvi != null && bProf.ndvi >= bProf.ndbi))) return;
+      }
+
+      // Discard false construction / road if region is actually water
+      if (type.includes("Construct") || type.includes("Road") || (p.transition_label && (p.transition_label.includes("Built-up") || p.transition_label.includes("Road")))) {
+        if (bCls && bCls.includes("Water") && aCls && aCls.includes("Water")) return;
+        if (aCls && aCls.includes("Water")) return;
+        const aProf = p.spectral_profile?.after || pair.spectral_profile?.after;
+        if (aProf && aProf.ndwi != null && aProf.ndwi > 0.15) return;
+        if (aProf && aProf.ndvi != null && aProf.ndvi < -0.05) return;
+      }
+
+      let boxPct = p.box_pct;
+      if (!boxPct && f.geometry?.coordinates) {
+        let fMinLon = Infinity, fMaxLon = -Infinity, fMinLat = Infinity, fMaxLat = -Infinity;
+        function extractF(arr) {
+          if (!arr || !arr.length) return;
+          if (typeof arr[0] === "number") {
+            const lon = arr[0], lat = arr[1];
+            if (lon < fMinLon) fMinLon = lon;
+            if (lon > fMaxLon) fMaxLon = lon;
+            if (lat < fMinLat) fMinLat = lat;
+            if (lat > fMaxLat) fMaxLat = lat;
+          } else {
+            for (let i = 0; i < arr.length; i++) extractF(arr[i]);
+          }
+        }
+        extractF(f.geometry.coordinates);
+        if (isFinite(fMinLon)) {
+          const x = Math.max(0, Math.min(95, ((fMinLon - minLon) / lonSpan) * 100));
+          const y = Math.max(0, Math.min(95, ((maxLat - fMaxLat) / latSpan) * 100));
+          const w = Math.max(4, Math.min(100 - x, ((fMaxLon - fMinLon) / lonSpan) * 100));
+          const h = Math.max(4, Math.min(100 - y, ((fMaxLat - fMinLat) / latSpan) * 100));
+          boxPct = {
+            x: Math.round(x * 10) / 10,
+            y: Math.round(y * 10) / 10,
+            w: Math.round(w * 10) / 10,
+            h: Math.round(h * 10) / 10
+          };
+        }
+      }
+
+      if (boxPct) {
+        let trans = p.transition_label;
+        if (!trans) {
+          if (type.includes("Construct") || aCls.includes("Built")) trans = "Vegetation → Built-up";
+          else if (type.includes("Clear") || aCls.includes("Soil") || aCls.includes("Ground")) trans = "Vegetation → Ground";
+          else if (type.includes("Road")) trans = "Vegetation → Road";
+          else if (type.includes("Water")) trans = "Land → Water (Extension)";
+          else if (type.includes("Demo")) trans = "Built-up → Ground";
+          else if (bCls && aCls) trans = `${bCls} → ${aCls}`;
+          else trans = type;
+        }
+
+        boxes.push(formatBoxItem({
+          id: idx + 1,
+          change_type: type,
+          transition_label: trans,
+          before_class: bCls,
+          after_class: aCls,
+          area_m2: area,
+          box_pct: boxPct,
+          proof: p.proof || null
+        }));
+      }
+    });
+
+    boxes.sort((a, b) => (b.area_m2 || 0) - (a.area_m2 || 0));
+  }
+
+  // 2. Fallback: derive from cursor_sample_grid.verified if no boxes found
+  if (boxes.length === 0 && pair.cursor_sample_grid?.verified) {
+    const vGrid = pair.cursor_sample_grid.verified;
+    const sz = vGrid.length;
+    const visited = Array.from({ length: sz }, () => Array(sz).fill(false));
+
+    for (let r = 0; r < sz; r++) {
+      for (let c = 0; c < sz; c++) {
+        if (vGrid[r][c] && !visited[r][c]) {
+          // BFS flood-fill component
+          let rMin = r, rMax = r, cMin = c, cMax = c, count = 0;
+          const q = [[r, c]];
+          visited[r][c] = true;
+
+          while (q.length > 0) {
+            const [cr, cc] = q.pop();
+            count++;
+            if (cr < rMin) rMin = cr;
+            if (cr > rMax) rMax = cr;
+            if (cc < cMin) cMin = cc;
+            if (cc > cMax) cMax = cc;
+
+            const neighbors = [[cr-1, cc], [cr+1, cc], [cr, cc-1], [cr, cc+1]];
+            for (const [nr, nc] of neighbors) {
+              if (nr >= 0 && nr < sz && nc >= 0 && nc < sz && vGrid[nr][nc] && !visited[nr][nc]) {
+                visited[nr][nc] = true;
+                q.push([nr, nc]);
+              }
+            }
+          }
+
+          if (count >= 3) {
+            const bw = Math.max(2, cMax - cMin + 1);
+            const bh = Math.max(2, rMax - rMin + 1);
+            const midR = Math.floor((rMin + rMax) / 2);
+            const midC = Math.floor((cMin + cMax) / 2);
+            const bCls = pair.cursor_sample_grid?.before?.class?.[midR]?.[midC] || "Vegetation";
+            const aCls = pair.cursor_sample_grid?.after?.class?.[midR]?.[midC] || "Built-up / Urban";
+            const cType = (aCls.includes("Built") ? "Construction" : (aCls.includes("Soil") || aCls.includes("Ground") ? "Clearance" : "Major Change"));
+            const tLbl = (aCls.includes("Built") ? "Vegetation → Built-up" : (aCls.includes("Soil") || aCls.includes("Ground") ? "Vegetation → Ground" : `${bCls} → ${aCls}`));
+
+            boxes.push(formatBoxItem({
+              id: boxes.length + 1,
+              change_type: cType,
+              transition_label: tLbl,
+              before_class: bCls,
+              after_class: aCls,
+              area_m2: count * 100,
+              box_pct: {
+                x: Math.round((cMin / sz) * 1000) / 10,
+                y: Math.round((rMin / sz) * 1000) / 10,
+                w: Math.round(Math.max(4, (bw / sz) * 100) * 10) / 10,
+                h: Math.round(Math.max(4, (bh / sz) * 100) * 10) / 10
+              }
+            }));
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Water extension proof check
+  if (pair.water_extent_stats?.is_extension_proven) {
+    const hasWaterBox = boxes.some(b => (b.transition_label || "").includes("Water"));
+    if (!hasWaterBox) {
+      boxes.unshift(formatBoxItem({
+        id: 999,
+        change_type: "Water Extension",
+        transition_label: "Land → Water (Extension)",
+        before_class: "Land",
+        after_class: "Water",
+        area_m2: (pair.water_extent_stats.delta_pixels || 25) * 100,
+        box_pct: { x: 30, y: 30, w: 25, h: 25 },
+        proof: pair.water_extent_stats.proof
       }));
     }
-  });
-  return boxes;
+  }
+
+  return boxes.slice(0, 8);
 }
 
 function renderChangeSquaresHtml(boxes) {
   if (!boxes || boxes.length === 0) return "";
+  const displayBoxes = boxes.slice(0, 8);
   return `
     <div class="change-squares-layer" style="position:absolute; inset:0; pointer-events:none; z-index:12;">
-      ${boxes.map(b => `
-        <div class="change-square-box" style="
+      ${displayBoxes.map((b, idx) => {
+        const displayLabel = b.transition_label || b.shortType || b.change_type;
+        const tagIsInside = (b.box_pct?.y || 0) < 10;
+        const areaStr = b.area_m2 >= 10000 
+          ? `${(b.area_m2 / 10000).toFixed(1)} ha` 
+          : `${Math.round(b.area_m2).toLocaleString()} m²`;
+
+        // Smart stagger if previous box has similar Y
+        const yOffset = (idx % 2 === 1 && (b.box_pct?.w || 0) < 25) ? "transform: translateY(14px);" : "";
+
+        return `
+        <div class="change-square-box" data-box-id="${b.id}" style="
           position: absolute;
           left: ${b.box_pct.x}%;
           top: ${b.box_pct.y}%;
-          width: ${Math.max(3, b.box_pct.w)}%;
-          height: ${Math.max(3, b.box_pct.h)}%;
-          border: 2px solid ${b.color};
-          background: ${b.fillColor};
-          box-shadow: 0 0 10px ${b.color};
+          width: ${Math.max(3.0, b.box_pct.w)}%;
+          height: ${Math.max(3.0, b.box_pct.h)}%;
+          border: 1.5px solid ${b.color};
+          background: ${b.fillColor || 'rgba(239, 68, 68, 0.12)'};
+          box-shadow: 0 0 10px ${b.color}55, inset 0 0 6px ${b.color}33;
+          border-radius: 3px;
           box-sizing: border-box;
           pointer-events: auto;
           cursor: pointer;
-        " title="${b.change_type} (${Math.round(b.area_m2)} m²)">
+          transition: transform 0.15s ease, box-shadow 0.15s ease;
+        " title="${displayLabel} (${areaStr})${b.proof ? ` — ${b.proof}` : ''}">
           <span class="change-square-tag" style="
             position: absolute;
-            bottom: 100%;
+            ${tagIsInside ? 'top: 2px;' : 'bottom: calc(100% + 2px);'}
             left: -1px;
-            background: ${b.color};
-            color: #030712;
-            font-weight: 800;
+            background: rgba(15, 23, 42, 0.90);
+            border: 1px solid ${b.color};
+            color: #f8fafc;
+            backdrop-filter: blur(6px);
+            font-family: 'JetBrains Mono', Inter, monospace;
+            font-weight: 700;
             font-size: 8px;
             line-height: 1;
-            padding: 2px 4px;
-            border-radius: 2px 2px 0 0;
+            padding: 2.5px 6px;
+            border-radius: 3px;
             white-space: nowrap;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-          ">${b.shortType}</span>
+            letter-spacing: 0.02em;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+            pointer-events: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            ${yOffset}
+          ">
+            <span style="color:${b.color}; font-weight:800;">${displayLabel}</span>
+            <span style="color:#94a3b8; font-size:7.5px; padding-left:3px; border-left:1px solid rgba(255,255,255,0.2);">${areaStr}</span>
+          </span>
         </div>
-      `).join("")}
+      `;
+      }).join("")}
     </div>
   `;
 }
@@ -300,40 +657,64 @@ window.openLightbox = function(url, title = "Band Map Inspection", boxes = null)
     if (oldOverlay) oldOverlay.remove();
     
     if (boxes && boxes.length > 0 && wrapper) {
+      const displayBoxes = boxes.slice(0, 8);
       const overlay = document.createElement("div");
       overlay.id = "lightbox-squares-overlay";
       overlay.className = "change-squares-layer";
       overlay.style.cssText = "position:absolute; inset:0; pointer-events:none; z-index:15;";
-      overlay.innerHTML = boxes.map(b => `
+      overlay.innerHTML = displayBoxes.map((b, idx) => {
+        const displayLabel = b.transition_label || b.shortType || b.change_type;
+        const tagIsInside = (b.box_pct?.y || 0) < 10;
+        const areaStr = b.area_m2 >= 10000 
+          ? `${(b.area_m2 / 10000).toFixed(1)} ha` 
+          : `${Math.round(b.area_m2).toLocaleString()} m²`;
+
+        const yOffset = (idx % 2 === 1 && (b.box_pct?.w || 0) < 25) ? "transform: translateY(14px);" : "";
+
+        return `
         <div class="change-square-box" style="
           position: absolute;
           left: ${b.box_pct.x}%;
           top: ${b.box_pct.y}%;
           width: ${Math.max(3, b.box_pct.w)}%;
           height: ${Math.max(3, b.box_pct.h)}%;
-          border: 2.5px solid ${b.color};
-          background: ${b.fillColor};
-          box-shadow: 0 0 14px ${b.color};
+          border: 1.5px solid ${b.color};
+          background: ${b.fillColor || 'rgba(239, 68, 68, 0.12)'};
+          box-shadow: 0 0 12px ${b.color}66;
+          border-radius: 3px;
           box-sizing: border-box;
           pointer-events: auto;
-        " title="${b.change_type} (${Math.round(b.area_m2)} m²)">
+          cursor: pointer;
+        " title="${displayLabel} (${areaStr})">
           <span class="change-square-tag" style="
             position: absolute;
-            bottom: 100%;
+            ${tagIsInside ? 'top: 2px;' : 'bottom: calc(100% + 2px);'}
             left: -1px;
-            background: ${b.color};
-            color: #030712;
-            font-weight: 800;
-            font-size: 10px;
+            background: rgba(15, 23, 42, 0.90);
+            border: 1px solid ${b.color};
+            color: #f8fafc;
+            backdrop-filter: blur(6px);
+            font-family: 'JetBrains Mono', Inter, monospace;
+            font-weight: 700;
+            font-size: 9px;
             line-height: 1;
             padding: 3px 6px;
-            border-radius: 3px 3px 0 0;
+            border-radius: 3px;
             white-space: nowrap;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-          ">${b.shortType}</span>
+            letter-spacing: 0.02em;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+            pointer-events: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            ${yOffset}
+          ">
+            <span style="color:${b.color}; font-weight:800;">${displayLabel}</span>
+            <span style="color:#94a3b8; font-size:8px; padding-left:3px; border-left:1px solid rgba(255,255,255,0.2);">${areaStr}</span>
+          </span>
         </div>
-      `).join("");
+      `;
+      }).join("");
       wrapper.appendChild(overlay);
     }
     modal.style.display = "flex";
@@ -1204,12 +1585,9 @@ function drawNdviTrajectorySvg(svg, wrapper, tooltip, epochs, isSidebar = true) 
   const hudNdbi = document.getElementById("hud-epoch-ndbi");
 
   function getEstimatedClass(ndvi, ndbi, ndwi) {
-    if (ndwi > 0.05) return { name: "Water Body", color: "#06b6d4" };
-    if (ndvi > 0.55) return { name: "Dense Vegetation", color: "#10b981" };
-    if (ndvi > 0.30) return { name: "Moderate Veg", color: "#34d399" };
-    if (ndbi > 0.10) return { name: "Built-up / Urban", color: "#f59e0b" };
-    if (ndvi < 0.20 && ndbi < 0.10) return { name: "Bare Soil", color: "#fb923c" };
-    return { name: "Mixed Surface", color: "#94a3b8" };
+    const cls = classifySpectralLandCover(ndvi, ndwi, ndbi);
+    const colorInfo = getClassColorInfo(cls);
+    return { name: cls, color: colorInfo.color };
   }
 
   function showPointInspection(pt) {
@@ -1518,63 +1896,47 @@ function setupTreeToggleListeners() {
   };
 }
 
+function getClassColorInfo(className, isAfter = false) {
+  const norm = (className || "").toLowerCase();
+  if (norm.includes("water")) {
+    return { name: "Water", color: "#0284c7", hexColor: "#0284c7", bgClass: "class-water", icon: "💧", desc: "Strong water evidence (NDWI 0.20 to 1.00)" };
+  }
+  if (norm.includes("dense")) {
+    return { name: "Dense Vegetation", color: "#22c55e", hexColor: "#15803d", bgClass: "class-dense-veg", icon: "🌲", desc: "Strong vegetation evidence (NDVI ≥ 0.50)" };
+  }
+  if (norm.includes("sparse") || (norm.includes("veg") && !norm.includes("dense"))) {
+    return { name: "Sparse Vegetation", color: "#84cc16", hexColor: "#84cc16", bgClass: "class-mod-veg", icon: "🌱", desc: "Moderate vegetation evidence (NDVI 0.20 to <0.50)" };
+  }
+  if (norm.includes("confusion")) {
+    return { name: "Built-up / Bare-land Confusion", color: "#eab308", hexColor: "#eab308", bgClass: "class-confusion", icon: "⚠️", desc: "Cannot confidently distinguish (NDBI 0.00 to <0.15)" };
+  }
+  if (norm.includes("built") || norm.includes("urban") || norm.includes("construct")) {
+    return { name: "Built-up", color: "#ef4444", hexColor: "#ef4444", bgClass: "class-built-up", icon: "🏢", desc: "Stronger built-up evidence (NDBI ≥ 0.15)" };
+  }
+  if (norm.includes("bare") || norm.includes("soil") || norm.includes("land") || norm.includes("ground") || norm.includes("barren")) {
+    return { name: "Bare Soil / Open Land", color: "#d97706", hexColor: "#92400e", bgClass: "class-bare-soil", icon: "🟤", desc: "Stronger bare-land evidence (NDBI -0.20 to <0.00)" };
+  }
+  return { name: "Unclassified / Other", color: "#94a3b8", hexColor: "#94a3b8", bgClass: "class-transitional", icon: "🔄", desc: "Unclassified / Mixed Surface" };
+}
+
 /**
  * Maps spectral indices (NDVI, NDWI, NDBI) to standard land-cover classification
- * according to spectral decision rules.
+ * according to the 6-class decision rules.
  */
 function getStandardClassInfo(ndvi, ndwi, ndbi) {
-  if (ndwi > 0.3 && ndbi < -0.1) {
-    return { name: "Water Body", cssClass: "class-water", icon: "💧", desc: "NDWI > 0.3 & NDBI < -0.1" };
-  }
-  if (ndvi > 0.6 && ndbi < 0.0) {
-    return { name: "Dense Vegetation", cssClass: "class-dense-veg", icon: "🌲", desc: "NDVI > 0.6 & NDBI < 0" };
-  }
-  if (ndvi >= 0.2 && ndvi <= 0.6 && ndbi < 0.0) {
-    return { name: "Moderate / Sparse Veg", cssClass: "class-mod-veg", icon: "🌿", desc: "0.2 ≤ NDVI ≤ 0.6 & NDBI < 0" };
-  }
-  if (ndbi > 0.0 && ndvi <= 0.2) {
-    return { name: "Built-up / Urban", cssClass: "class-built-up", icon: "🏙️", desc: "NDBI > 0 & NDVI ≤ 0.2" };
-  }
-  if (ndvi <= 0.1 && ndbi <= 0.0 && ndwi <= 0.0) {
-    return { name: "Bare Soil / Barren", cssClass: "class-bare-soil", icon: "🏜️", desc: "NDVI ≤ 0.1 & NDBI ≤ 0 & NDWI ≤ 0" };
-  }
-  return { name: "Transitional / Other", cssClass: "class-transitional", icon: "🔄", desc: "Mixed / Transitional Surface" };
+  const cls = classifySpectralLandCover(ndvi, ndwi, ndbi);
+  return getClassColorInfo(cls);
 }
 
 function indexToPercent(val) {
   if (val == null || isNaN(val)) return "50%";
-  const clamped = Math.max(-1, Math.min(1, val));
+  const clamped = Math.max(-1, Math.min(1, Number(val)));
   return `${Math.round(((clamped + 1) / 2) * 100)}%`;
 }
 
 function fmtVal(val) {
   if (val == null || isNaN(val)) return "--";
   return (val >= 0 ? "+" : "") + Number(val).toFixed(2);
-}
-
-/**
- * Returns color tokens and icons for standard land-cover classification.
- * Matches user's exact specification:
- * - Dense Veg: Dark Green (#15803d / #22c55e)
- * - Bare Land / Soil: Earth Brown (#92400e / #d97706)
- * - Built-up: Amber / Gold (#f59e0b)
- * - Water: Deep Blue (#0284c7)
- */
-function getClassColorInfo(className, isAfter = false) {
-  const norm = (className || "").toLowerCase();
-  if (norm.includes("dense veg") || norm.includes("vegetation") || (!isAfter && (norm.includes("transitional") || norm.includes("unclass")))) {
-    return { name: "Dense Vegetation", color: "#22c55e", hexColor: "#15803d", bgClass: "class-dense-veg", icon: "🌲", desc: "Dark Green Canopy" };
-  }
-  if (norm.includes("veg")) {
-    return { name: "Moderate / Sparse Veg", color: "#84cc16", hexColor: "#84cc16", bgClass: "class-mod-veg", icon: "🌿", desc: "Light Green / Olive Canopy" };
-  }
-  if (norm.includes("built") || norm.includes("urban") || norm.includes("construct")) {
-    return { name: "Built-up / Urban", color: "#f59e0b", hexColor: "#f59e0b", bgClass: "class-built-up", icon: "🏙️", desc: "Amber / Gold (Impervious Structure)" };
-  }
-  if (norm.includes("water")) {
-    return { name: "Water Body", color: "#0284c7", hexColor: "#0284c7", bgClass: "class-water", icon: "💧", desc: "Deep Blue (Water Body)" };
-  }
-  return { name: "Bare Land / Soil", color: "#d97706", hexColor: "#92400e", bgClass: "class-bare-soil", icon: "🏜️", desc: "Earth Brown (Exposed Land)" };
 }
 
 /**
@@ -1658,14 +2020,28 @@ function getChangedRegionClassification(sampleGrid, pFeatures, pairProf) {
 
 /**
  * Maps standard land-cover class name to distinct RGB values.
+ * User requirement:
+ * - Built-up / Urban / Construction: RED (#ef4444: 239, 68, 68)
+ * - Bare Soil / Barren / Ground: YELLOW (#fde047: 253, 224, 71)
+ * - Water: BLUE (#0284c7: 2, 132, 199)
+ * - Vegetation: GREEN (#15803d / #22c55e)
  */
 function getClassRgb(className, defaultRgb = [148, 163, 184]) {
   const norm = (className || "").toLowerCase();
-  if (norm.includes("dense veg")) return [21, 128, 61];      // Dark Green
-  if (norm.includes("veg")) return [132, 204, 22];           // Light Green / Olive
-  if (norm.includes("bare") || norm.includes("soil") || norm.includes("land")) return [146, 64, 14]; // Earth Brown
-  if (norm.includes("built") || norm.includes("urban") || norm.includes("construct")) return [245, 158, 11]; // Amber
-  if (norm.includes("water")) return [2, 132, 199];          // Deep Blue
+  if (norm.includes("water")) return [2, 132, 199];          // Deep Blue #0284c7
+  if (norm.includes("dense")) return [21, 128, 61];          // Dark Forest Green #15803d
+  if (norm.includes("sparse") || (norm.includes("veg") && !norm.includes("dense"))) {
+    return [132, 204, 22];                                   // Light Olive Green #84cc16
+  }
+  if (norm.includes("confusion")) {
+    return [234, 179, 8];                                    // Amber Warning / Sand #eab308
+  }
+  if (norm.includes("built") || norm.includes("urban") || norm.includes("construct")) {
+    return [239, 68, 68];                                    // Crimson Red #ef4444
+  }
+  if (norm.includes("bare") || norm.includes("soil") || norm.includes("land") || norm.includes("ground") || norm.includes("barren")) {
+    return [146, 64, 14];                                    // Earth Brown #92400e
+  }
   return defaultRgb;
 }
 
@@ -1727,7 +2103,7 @@ function renderPerPixelClassifiedCanvas(canvasEl, maskSrcUrl, sampleGrid, isAfte
           } else {
             // Color according to its own individual class
             const targetCls = isAfter ? afterCls : beforeCls;
-            const [tr, tg, tb] = getClassRgb(targetCls, isAfter ? [146, 64, 14] : [21, 128, 61]);
+            const [tr, tg, tb] = getClassRgb(targetCls, isAfter ? [253, 224, 71] : [21, 128, 61]);
             data[i] = tr;
             data[i + 1] = tg;
             data[i + 2] = tb;
@@ -1747,6 +2123,51 @@ function renderPerPixelClassifiedCanvas(canvasEl, maskSrcUrl, sampleGrid, isAfte
     }
   };
   img.src = maskSrcUrl;
+}
+
+/**
+ * Renders the NDVI Band Map with user-specified color palette:
+ * - Built-up / Urban / Construction: Reddish (#ef4444)
+ * - Bare Ground / Soil / Barren: Light Yellow (#fde047)
+ * - Water: Deep Blue (#0284c7)
+ * - Vegetation: Vibrant Emerald / Lime Green (#22c55e / #16a34a)
+ * - Directly renders major change bounding boxes onto the canvas
+ */
+function renderRecoloredNdviCanvas(canvasEl, imgSrc, sampleGrid, isAfter, changeBoxes = [], highlightChanges = false) {
+  if (!canvasEl || !imgSrc) return;
+  const ctx = canvasEl.getContext("2d");
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = () => {
+    const w = img.naturalWidth || 512;
+    const h = img.naturalHeight || 512;
+    canvasEl.width = w;
+    canvasEl.height = h;
+
+    // High-resolution scientific raster rendering
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, 0, 0, w, h);
+
+    // Optional: Subtle highlight illumination over verified change pixels
+    if (highlightChanges && sampleGrid?.verified) {
+      const vGrid = sampleGrid.verified;
+      const sz = vGrid.length;
+      if (sz > 0) {
+        ctx.fillStyle = isAfter ? "rgba(249, 115, 22, 0.40)" : "rgba(56, 189, 248, 0.35)";
+        const stepX = w / sz;
+        const stepY = h / sz;
+        for (let r = 0; r < sz; r++) {
+          for (let c = 0; c < sz; c++) {
+            if (vGrid[r][c] > 0) {
+              ctx.fillRect(c * stepX, r * stepY, stepX + 0.5, stepY + 0.5);
+            }
+          }
+        }
+      }
+    }
+  };
+  img.src = imgSrc;
 }
 
 /**
@@ -1788,16 +2209,29 @@ function attachPlotSpectralHover(el, pair, pIdx) {
 
     const ndviB = grid?.before?.ndvi?.[gy]?.[gx] ?? pair.spectral_profile?.before?.ndvi ?? 0.40;
     const ndwiB = grid?.before?.ndwi?.[gy]?.[gx] ?? pair.spectral_profile?.before?.ndwi ?? -0.46;
-    const ndbiB = grid?.before?.ndbi?.[gy]?.[gx] ?? pair.spectral_profile?.before?.ndbi ?? 0.01;
-    const clsB = grid?.before?.class?.[gy]?.[gx] ?? "Dense Vegetation";
+    const ndbiB = grid?.before?.ndbi?.[gy]?.[gx] ?? pair.spectral_profile?.before?.ndbi ?? 0.05;
+    const clsB = grid?.before?.class?.[gy]?.[gx] || classifySpectralLandCover(ndviB, ndwiB, ndbiB);
 
     const ndviA = grid?.after?.ndvi?.[gy]?.[gx] ?? pair.spectral_profile?.after?.ndvi ?? 0.42;
     const ndwiA = grid?.after?.ndwi?.[gy]?.[gx] ?? pair.spectral_profile?.after?.ndwi ?? -0.49;
     const ndbiA = grid?.after?.ndbi?.[gy]?.[gx] ?? pair.spectral_profile?.after?.ndbi ?? -0.01;
-    const clsA = grid?.after?.class?.[gy]?.[gx] ?? "Bare Soil / Barren";
+    const clsA = grid?.after?.class?.[gy]?.[gx] || classifySpectralLandCover(ndviA, ndwiA, ndbiA);
 
-    const isChanged = grid?.verified ? (grid.verified[gy]?.[gx] > 0) : (clsB !== clsA);
-    const transStr = grid?.change_type?.[gy]?.[gx] || (isChanged ? `${clsB} → ${clsA}` : "Unchanged Surface");
+    let isChanged = grid?.verified ? (grid.verified[gy]?.[gx] > 0) : (clsB !== clsA);
+    let transStr = grid?.change_type?.[gy]?.[gx];
+    if (clsB === "Water" && clsA === "Water") {
+      transStr = "Unchanged Surface (Water Body)";
+      isChanged = false;
+    } else if (!transStr || transStr === "No Change" || ((transStr.includes("Demo") || transStr.includes("Built")) && (clsB.includes("Soil") || clsB.includes("Barren") || clsB === "Water" || ndviB >= 0.10))) {
+      transStr = getSpectralTransition(clsB, clsA);
+    }
+    if ((transStr.includes("Construction") || transStr.includes("Built") || transStr.includes("Road")) && clsA === "Water") {
+      transStr = "Unchanged Surface (Water Body)";
+      isChanged = false;
+    }
+    if (transStr.includes("Seasonal Greening") || transStr.includes("Seasonal Phenology") || clsB === clsA) {
+      isChanged = false;
+    }
 
     if (tooltip) {
       tooltip.style.display = "flex";
@@ -2049,7 +2483,10 @@ function renderChangeTreeView(timeline, analysisData) {
             <span style="font-size:10px; font-weight:800; color:#60a5fa;">T${pIdx + 1} (Before)</span>
             <span style="font-size:8px; color:#94a3b8;">${pair.date_before}</span>
           </div>
-          <img src="${rgbB}" alt="Before T${pIdx + 1}" class="tree-image-preview" title="Click to enlarge Before RGB" />
+          <div style="position:relative; width:100%; border-radius:4px; overflow:hidden;">
+            <img src="${rgbB}" alt="Before T${pIdx + 1}" class="tree-image-preview" style="display:block; width:100%;" title="Click to enlarge Before RGB" />
+            ${renderChangeSquaresHtml(getMajorChangeBoxes(pair))}
+          </div>
           <div style="font-size:8px; color:#94a3b8; display:flex; justify-content:space-between;">
             <span>NDVI: <b style="color:#10b981;">${pair.spectral_profile?.before?.ndvi?.toFixed(2) ?? '--'}</b></span>
             <span>NDBI: <b style="color:#f59e0b;">${pair.spectral_profile?.before?.ndbi?.toFixed(2) ?? '--'}</b></span>
@@ -2080,7 +2517,7 @@ function renderChangeTreeView(timeline, analysisData) {
     if (imgB) {
       attachPlotSpectralHover(imgB, pair, pIdx);
       if (rgbB) {
-        imgB.onclick = () => openLightbox(rgbB, `Pair ${pIdx + 1} Before RGB (${pair.date_before})`);
+        imgB.onclick = () => openLightbox(rgbB, `Pair ${pIdx + 1} Before RGB (${pair.date_before})`, pairChangeBoxes);
       }
     }
     const imgA = pairCard.querySelector(".tree-image-box.after img");
@@ -2256,7 +2693,8 @@ function renderChangeTreeView(timeline, analysisData) {
         <span><span class="tree-legend-dot" style="background:#15803d;"></span>Dense Veg</span>
         <span><span class="tree-legend-dot" style="background:#84cc16;"></span>Sparse Veg</span>
         <span><span class="tree-legend-dot" style="background:#92400e;"></span>Bare Land</span>
-        <span><span class="tree-legend-dot" style="background:#f59e0b;"></span>Built-up</span>
+        <span><span class="tree-legend-dot" style="background:#ef4444;"></span>Built-up</span>
+        <span><span class="tree-legend-dot" style="background:#eab308;"></span>Confusion</span>
         <span><span class="tree-legend-dot" style="background:#0284c7;"></span>Water</span>
       </div>
 
@@ -2319,7 +2757,8 @@ function renderChangeTreeView(timeline, analysisData) {
         <span><span class="tree-legend-dot" style="background:#15803d;"></span>Dense Veg</span>
         <span><span class="tree-legend-dot" style="background:#84cc16;"></span>Sparse Veg</span>
         <span><span class="tree-legend-dot" style="background:#92400e;"></span>Bare Land</span>
-        <span><span class="tree-legend-dot" style="background:#f59e0b;"></span>Built-up</span>
+        <span><span class="tree-legend-dot" style="background:#ef4444;"></span>Built-up</span>
+        <span><span class="tree-legend-dot" style="background:#eab308;"></span>Confusion</span>
         <span><span class="tree-legend-dot" style="background:#0284c7;"></span>Water</span>
       </div>
 
@@ -2665,8 +3104,8 @@ function renderYearwiseMaskGallery(pairwise) {
     const snapA = currentSiteTimeline?.snapshots?.find(s => s.tile_id === pair.tile_after_id || s.date === pair.date_after);
     const rgbB = pair.rgb_before_url || snapB?.thumbnail_url || "";
     const rgbA = pair.rgb_after_url || snapA?.thumbnail_url || "";
-    const ndviB = pair.ndvi_before_url || "";
-    const ndviA = pair.ndvi_after_url || "";
+    const ndviB = pair.ndvi_before_url || pair.before_ndvi_url || "";
+    const ndviA = pair.ndvi_after_url || pair.after_ndvi_url || "";
     const rawMaskUrl = pair.binary_mask_url || "";
     const filteredMaskUrl = pair.filtered_mask_url || "";
 
@@ -2678,6 +3117,59 @@ function renderYearwiseMaskGallery(pairwise) {
     const changeBoxes = getMajorChangeBoxes(pair);
     const squaresHtml = renderChangeSquaresHtml(changeBoxes);
 
+    // Count transitions
+    let countBuild = 0, countGround = 0, countWater = 0, countRoad = 0, countDemo = 0;
+    changeBoxes.forEach(b => {
+      const lbl = (b.transition_label || b.change_type || "").toLowerCase();
+      if (lbl.includes("built") || lbl.includes("construction")) countBuild++;
+      else if (lbl.includes("ground") || lbl.includes("clearance")) countGround++;
+      else if (lbl.includes("water")) countWater++;
+      else if (lbl.includes("road")) countRoad++;
+      else if (lbl.includes("demo")) countDemo++;
+    });
+
+    // Water extent proof pill
+    const wStats = pair.water_extent_stats;
+    let waterProofHtml = "";
+    if (wStats) {
+      if (wStats.is_extension_proven) {
+        waterProofHtml = `
+          <div class="water-proof-pill extension" style="
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700;
+            background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.5); color: #38bdf8;
+          " title="${wStats.proof}">
+            <span>💧</span>
+            <span>WATER EXTENSION VERIFIED: <b>+${wStats.delta_pixels.toLocaleString()} px</b> (+${(wStats.delta_pixels * 0.01).toFixed(2)} ha)</span>
+            <span style="font-size: 9px; opacity: 0.85; font-family: monospace;">(${wStats.before_pixels.toLocaleString()} → ${wStats.after_pixels.toLocaleString()} px)</span>
+          </div>
+        `;
+      } else if (wStats.is_shrinkage_proven) {
+        waterProofHtml = `
+          <div class="water-proof-pill shrinkage" style="
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700;
+            background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.5); color: #fbbf24;
+          " title="${wStats.proof}">
+            <span>💧</span>
+            <span>WATER SHRINKAGE: <b>${wStats.delta_pixels.toLocaleString()} px</b></span>
+            <span style="font-size: 9px; opacity: 0.85; font-family: monospace;">(${wStats.before_pixels.toLocaleString()} → ${wStats.after_pixels.toLocaleString()} px)</span>
+          </div>
+        `;
+      } else {
+        waterProofHtml = `
+          <div class="water-proof-pill stable" style="
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;
+            background: rgba(148, 163, 184, 0.1); border: 1px solid rgba(148, 163, 184, 0.25); color: #94a3b8;
+          " title="${wStats.proof}">
+            <span>💧</span>
+            <span>Water Extent Stable: Δ ${wStats.delta_pixels >= 0 ? '+' : ''}${wStats.delta_pixels} px (&lt;25 px threshold; noise filtered)</span>
+          </div>
+        `;
+      }
+    }
+
     card.innerHTML = `
       <div class="mask-pair-header">
         <div style="display:flex; align-items:center; gap:10px;">
@@ -2687,7 +3179,7 @@ function renderYearwiseMaskGallery(pairwise) {
           </span>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
-          <button class="hud-btn btn-toggle-squares active" style="padding:4px 10px; font-size:11px; background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); color:#fbbf24;" title="Toggle Major Change Bounding Squares on After Images">
+          <button class="hud-btn btn-toggle-squares active" style="padding:4px 10px; font-size:11px; background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); color:#fbbf24;" title="Toggle Major Change Bounding Squares on Images">
             🔲 Major Changes (${changeBoxes.length})
           </button>
           <button class="hud-btn btn-theater-toggle" style="padding:4px 10px; font-size:11px; background:rgba(6,182,212,0.15); border:1px solid rgba(6,182,212,0.4); color:#38bdf8;" title="Maximize this pair to full screen theater mode">
@@ -2725,13 +3217,51 @@ function renderYearwiseMaskGallery(pairwise) {
         </div>
       </div>
 
-      <!-- 6-Panel Multi-Band Matrix -->
+      <!-- Change Transition & Water Extent Proof Banner -->
+      <div class="pair-change-summary-bar" style="
+        display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+        padding: 8px 12px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255,255,255,0.07);
+        border-radius: 8px; margin-bottom: 12px;
+      ">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span style="font-size:11px; font-weight:800; color:#f8fafc; text-transform:uppercase; letter-spacing:0.04em;">
+            🏷️ Major Transitions Detected:
+          </span>
+          ${countBuild > 0 ? `<span class="transition-badge-item" style="padding:2px 8px; border-radius:4px; font-size:10px; font-weight:800; background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.5); color:#ef4444;">Vegetation → Built-up (${countBuild})</span>` : ''}
+          ${countGround > 0 ? `<span class="transition-badge-item" style="padding:2px 8px; border-radius:4px; font-size:10px; font-weight:800; background:rgba(253,224,71,0.2); border:1px solid rgba(253,224,71,0.5); color:#fde047;">Vegetation → Ground (${countGround})</span>` : ''}
+          ${countRoad > 0 ? `<span class="transition-badge-item" style="padding:2px 8px; border-radius:4px; font-size:10px; font-weight:800; background:rgba(168,85,247,0.2); border:1px solid rgba(168,85,247,0.5); color:#c084fc;">Vegetation → Road (${countRoad})</span>` : ''}
+          ${countDemo > 0 ? `<span class="transition-badge-item" style="padding:2px 8px; border-radius:4px; font-size:10px; font-weight:800; background:rgba(251,146,60,0.2); border:1px solid rgba(251,146,60,0.5); color:#fb923c;">Built-up → Ground (${countDemo})</span>` : ''}
+          ${(countBuild === 0 && countGround === 0 && countRoad === 0 && countDemo === 0 && changeBoxes.length > 0) ? `<span class="transition-badge-item" style="padding:2px 8px; border-radius:4px; font-size:10px; font-weight:800; background:rgba(56,189,248,0.2); border:1px solid rgba(56,189,248,0.5); color:#38bdf8;">Changes (${changeBoxes.length})</span>` : ''}
+          ${changeBoxes.length === 0 ? `<span style="font-size:11px; color:#64748b; font-style:italic;">No major structural changes in this interval</span>` : ''}
+        </div>
+        <div>
+          ${waterProofHtml}
+        </div>
+      </div>
+
+      <!-- Interactive NDVI Visualization Mode & Overlay Switcher -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding:6px 12px; background:rgba(30,41,59,0.55); border:1px solid rgba(255,255,255,0.08); border-radius:6px;">
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span style="font-size:10px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:0.04em;">NDVI Display Mode:</span>
+          <button class="ndvi-mode-btn active" id="btn-ndvi-continuous-${idx}" style="padding:3px 9px; font-size:10px; font-weight:700; border-radius:4px; border:1px solid #10b981; background:rgba(16,185,129,0.2); color:#6ee7b7; cursor:pointer;">🌿 Scientific Natural</button>
+          <button class="ndvi-mode-btn" id="btn-ndvi-highlight-${idx}" style="padding:3px 9px; font-size:10px; font-weight:700; border-radius:4px; border:1px solid rgba(255,255,255,0.15); background:transparent; color:#cbd5e1; cursor:pointer;">⚡ Highlight Changes</button>
+          ${pair.ndvi_delta_url ? `<button class="ndvi-mode-btn" id="btn-ndvi-delta-${idx}" style="padding:3px 9px; font-size:10px; font-weight:700; border-radius:4px; border:1px solid rgba(255,255,255,0.15); background:transparent; color:#cbd5e1; cursor:pointer;">📊 Difference (ΔNDVI)</button>` : ''}
+        </div>
+        <div>
+          <button class="ndvi-toggle-overlays-btn" id="btn-toggle-overlays-${idx}" style="padding:3px 9px; font-size:10px; font-weight:700; border-radius:4px; border:1px solid rgba(255,255,255,0.18); background:rgba(15,23,42,0.85); color:#f8fafc; cursor:pointer;" title="Hide or show change tags & outline boxes">
+            👁️ Change Outlines: ON
+          </button>
+        </div>
+      </div>
+
+      <!-- 4-Panel Multi-Band Matrix Grid (RGB & NDVI Comparison with Direct Change Squares) -->
       <div class="mask-hex-grid">
         <!-- 1. Before RGB -->
-        <div class="mask-box" onclick="openLightbox('${rgbB}', 'Before RGB (${pair.date_before})')">
+        <div class="mask-box mask-box-before-rgb">
           <span class="mask-box-badge rgb">T1 RGB</span>
           <div class="mask-img-wrap" title="Click to enlarge Before RGB (${pair.date_before})">
             ${rgbB ? `<img src="${rgbB}" alt="Before RGB" loading="eager" />` : `<span style="font-size:10px; color:#94a3b8;">No RGB</span>`}
+            ${squaresHtml}
             <div class="sync-crosshair"></div>
           </div>
           <span class="mask-box-label">Before RGB (${pair.date_before})</span>
@@ -2748,45 +3278,26 @@ function renderYearwiseMaskGallery(pairwise) {
           <span class="mask-box-label">After RGB (${pair.date_after})</span>
         </div>
 
-        <!-- 3. Before NDVI Band Map -->
-        <div class="mask-box" onclick="openLightbox('${ndviB}', 'Before NDVI Band Map (${pair.date_before})')">
+        <!-- 3. Before NDVI Band Map (Annotated with Major Change Squares) -->
+        <div class="mask-box mask-box-before-ndvi">
           <span class="mask-box-badge ndvi">T1 NDVI</span>
           <div class="mask-img-wrap" title="Click to enlarge Before NDVI Band Map (${pair.date_before})">
-            ${ndviB ? `<img src="${ndviB}" alt="Before NDVI" loading="eager" />` : `<span style="font-size:10px; color:#94a3b8;">NDVI Map</span>`}
+            ${ndviB ? `<canvas class="ndvi-recolor-canvas before-ndvi-canvas" id="canvas-ndvi-b-${idx}" style="width:100%; height:100%; object-fit:contain; display:block;"></canvas>` : `<span style="font-size:10px; color:#94a3b8;">NDVI Map</span>`}
+            ${squaresHtml}
             <div class="sync-crosshair"></div>
           </div>
           <span class="mask-box-label" style="color:#6ee7b7;">Before NDVI (${pair.date_before})</span>
         </div>
 
-        <!-- 4. After NDVI Band Map (Annotated with Major Change Squares) -->
+        <!-- 4. After NDVI Band Map (Annotated with Major Change Squares & Transition Labels) -->
         <div class="mask-box mask-box-after-ndvi">
           <span class="mask-box-badge ndvi" style="background:#f59e0b; color:#030712;">T2 NDVI</span>
           <div class="mask-img-wrap" title="Click to enlarge After NDVI Band Map (${pair.date_after})">
-            ${ndviA ? `<img src="${ndviA}" alt="After NDVI" loading="eager" />` : `<span style="font-size:10px; color:#94a3b8;">NDVI Map</span>`}
+            ${ndviA ? `<canvas class="ndvi-recolor-canvas after-ndvi-canvas" id="canvas-ndvi-a-${idx}" style="width:100%; height:100%; object-fit:contain; display:block;"></canvas>` : `<span style="font-size:10px; color:#94a3b8;">NDVI Map</span>`}
             ${squaresHtml}
             <div class="sync-crosshair"></div>
           </div>
           <span class="mask-box-label" style="color:#6ee7b7;">After NDVI (${pair.date_after})</span>
-        </div>
-
-        <!-- 5. Raw ChangeFormer Binary Mask -->
-        <div class="mask-box" onclick="openLightbox('${rawMaskUrl}', 'Raw ChangeFormer Binary Prediction (0/1)')">
-          <span class="mask-box-badge binary">Neural Net</span>
-          <div class="mask-img-wrap" style="border-color: rgba(6, 182, 212, 0.4);" title="Raw MTKD-ChangeFormer Binary Prediction (0/1)">
-            ${rawMaskUrl ? `<img src="${rawMaskUrl}" alt="ChangeFormer Mask" loading="eager" />` : `<span style="font-size:10px; color:#94a3b8;">Binary Mask</span>`}
-            <div class="sync-crosshair"></div>
-          </div>
-          <span class="mask-box-label" style="color:#38bdf8;">Binary Mask (Where)</span>
-        </div>
-
-        <!-- 6. Semantic-Verified Change Mask -->
-        <div class="mask-box" onclick="openLightbox('${filteredMaskUrl}', 'Semantic-Verified True Changes (Contradictions Removed)')">
-          <span class="mask-box-badge verified">Verified</span>
-          <div class="mask-img-wrap" style="border-color: rgba(245, 158, 11, 0.4);" title="Semantically Verified Mask (Seasonal noise rejected)">
-            ${filteredMaskUrl ? `<img src="${filteredMaskUrl}" alt="Verified Mask" loading="eager" />` : `<span style="font-size:10px; color:#94a3b8;">Verified Mask</span>`}
-            <div class="sync-crosshair"></div>
-          </div>
-          <span class="mask-box-label" style="color:#f59e0b;">Verified Mask (What)</span>
         </div>
       </div>
 
@@ -2816,7 +3327,81 @@ function renderYearwiseMaskGallery(pairwise) {
       </div>
     `;
 
-    // After RGB and After NDVI open lightbox with change boxes
+    // Render high-fidelity continuous scientific NDVI canvases
+    const cvsB = card.querySelector(`#canvas-ndvi-b-${idx}`);
+    if (cvsB && ndviB) {
+      renderRecoloredNdviCanvas(cvsB, ndviB, pair.cursor_sample_grid, false, changeBoxes, false);
+    }
+    const cvsA = card.querySelector(`#canvas-ndvi-a-${idx}`);
+    if (cvsA && ndviA) {
+      renderRecoloredNdviCanvas(cvsA, ndviA, pair.cursor_sample_grid, true, changeBoxes, false);
+    }
+
+    // Connect NDVI Mode Switcher & Overlays Toggle
+    const btnCont = card.querySelector(`#btn-ndvi-continuous-${idx}`);
+    const btnHigh = card.querySelector(`#btn-ndvi-highlight-${idx}`);
+    const btnDelta = card.querySelector(`#btn-ndvi-delta-${idx}`);
+    const btnToggleOverlays = card.querySelector(`#btn-toggle-overlays-${idx}`);
+
+    function setModeActive(activeBtn) {
+      [btnCont, btnHigh, btnDelta].forEach(b => {
+        if (!b) return;
+        if (b === activeBtn) {
+          b.classList.add("active");
+          b.style.borderColor = "#10b981";
+          b.style.background = "rgba(16,185,129,0.2)";
+          b.style.color = "#6ee7b7";
+        } else {
+          b.classList.remove("active");
+          b.style.borderColor = "rgba(255,255,255,0.15)";
+          b.style.background = "transparent";
+          b.style.color = "#cbd5e1";
+        }
+      });
+    }
+
+    if (btnCont) {
+      btnCont.onclick = () => {
+        setModeActive(btnCont);
+        renderRecoloredNdviCanvas(cvsB, ndviB, pair.cursor_sample_grid, false, changeBoxes, false);
+        renderRecoloredNdviCanvas(cvsA, ndviA, pair.cursor_sample_grid, true, changeBoxes, false);
+      };
+    }
+    if (btnHigh) {
+      btnHigh.onclick = () => {
+        setModeActive(btnHigh);
+        renderRecoloredNdviCanvas(cvsB, ndviB, pair.cursor_sample_grid, false, changeBoxes, true);
+        renderRecoloredNdviCanvas(cvsA, ndviA, pair.cursor_sample_grid, true, changeBoxes, true);
+      };
+    }
+    if (btnDelta && pair.ndvi_delta_url) {
+      btnDelta.onclick = () => {
+        setModeActive(btnDelta);
+        renderRecoloredNdviCanvas(cvsB, ndviB, pair.cursor_sample_grid, false, changeBoxes, false);
+        renderRecoloredNdviCanvas(cvsA, pair.ndvi_delta_url, pair.cursor_sample_grid, true, changeBoxes, false);
+      };
+    }
+    if (btnToggleOverlays) {
+      let overlaysOn = true;
+      btnToggleOverlays.onclick = () => {
+        overlaysOn = !overlaysOn;
+        const layers = card.querySelectorAll(".change-squares-layer");
+        layers.forEach(l => {
+          l.style.display = overlaysOn ? "block" : "none";
+        });
+        btnToggleOverlays.textContent = overlaysOn ? "👁️ Change Outlines: ON" : "👁️ Change Outlines: OFF";
+        btnToggleOverlays.style.color = overlaysOn ? "#f8fafc" : "#94a3b8";
+      };
+    }
+
+    // All 4 image boxes open lightbox with change boxes
+    const beforeRgbBox = card.querySelector(".mask-box-before-rgb");
+    if (beforeRgbBox && rgbB) {
+      beforeRgbBox.onclick = (e) => {
+        if (e.target.closest(".change-square-box")) return;
+        openLightbox(rgbB, `Before RGB (${pair.date_before})`, changeBoxes);
+      };
+    }
     const afterRgbBox = card.querySelector(".mask-box-after-rgb");
     if (afterRgbBox && rgbA) {
       afterRgbBox.onclick = (e) => {
@@ -2824,11 +3409,20 @@ function renderYearwiseMaskGallery(pairwise) {
         openLightbox(rgbA, `After RGB (${pair.date_after})`, changeBoxes);
       };
     }
+    const beforeNdviBox = card.querySelector(".mask-box-before-ndvi");
+    if (beforeNdviBox && ndviB) {
+      beforeNdviBox.onclick = (e) => {
+        if (e.target.closest(".change-square-box")) return;
+        const targetUrl = cvsB ? cvsB.toDataURL() : ndviB;
+        openLightbox(targetUrl, `Before NDVI (${pair.date_before})`, changeBoxes);
+      };
+    }
     const afterNdviBox = card.querySelector(".mask-box-after-ndvi");
     if (afterNdviBox && ndviA) {
       afterNdviBox.onclick = (e) => {
         if (e.target.closest(".change-square-box")) return;
-        openLightbox(ndviA, `After NDVI (${pair.date_after})`, changeBoxes);
+        const targetUrl = cvsA ? cvsA.toDataURL() : ndviA;
+        openLightbox(targetUrl, `After NDVI (${pair.date_after})`, changeBoxes);
       };
     }
 
@@ -2896,36 +3490,11 @@ function attachCursorInspector(card, pair, idx) {
   const crosshairs = card.querySelectorAll(".sync-crosshair");
 
   function classify(ndvi, ndwi, ndbi) {
-    if (ndwi > 0.3 && ndbi < -0.1) return "Water";
-    if (ndvi > 0.6 && ndbi < 0.0) return "Dense Vegetation";
-    if (ndvi >= 0.2 && ndvi <= 0.6 && ndbi < 0.0) return "Moderate / Sparse Vegetation";
-    if (ndbi > 0.0 && ndvi <= 0.2) return "Built-up / Urban";
-    if (ndvi <= 0.1 && ndbi <= 0.0 && ndwi <= 0.0) return "Bare Soil / Barren";
-    return "Unclassified / Transitional";
+    return classifySpectralLandCover(ndvi, ndwi, ndbi);
   }
 
   function getTransition(cB, cA) {
-    if (cB === cA) return "Unchanged Surface";
-    if (cB.includes("Vegetation") && cA.includes("Vegetation")) return "Seasonal Phenology (Unchanged)";
-    if ((cB.includes("Vegetation") || cB.includes("Bare Soil")) && cA.includes("Built-up")) {
-      return "🏗️ Construction";
-    }
-    if (cB.includes("Vegetation") && cA.includes("Bare Soil")) {
-      return "🪓 Clearance";
-    }
-    if (cB.includes("Water") && (cA.includes("Bare Soil") || cA.includes("Vegetation"))) {
-      return "💧 Water Shrinkage";
-    }
-    if ((cB.includes("Bare Soil") || cB.includes("Vegetation")) && cA.includes("Water")) {
-      return "💧 Water Expansion";
-    }
-    if (cB.includes("Built-up") && (cA.includes("Vegetation") || cA.includes("Bare Soil"))) {
-      return "🏚️ Demolition / Reversion";
-    }
-    if (cB.includes("Unclassified") && cA.includes("Unclassified")) {
-      return "Unchanged Surface";
-    }
-    return `${cB} → ${cA}`;
+    return getSpectralTransition(cB, cA);
   }
 
   maskBoxes.forEach((box) => {
@@ -2962,10 +3531,17 @@ function attachCursorInspector(card, pair, idx) {
         ndwiA = sampleGrid.after.ndwi[r]?.[c] ?? 0;
         ndbiA = sampleGrid.after.ndbi[r]?.[c] ?? 0;
 
-        classB = sampleGrid.before.class?.[r]?.[c] || classify(ndviB, ndwiB, ndbiB);
-        classA = sampleGrid.after.class?.[r]?.[c] || classify(ndviA, ndwiA, ndbiA);
+        classB = sampleGrid.before.class?.[r]?.[c] || classifySpectralLandCover(ndviB, ndwiB, ndbiB);
+        classA = sampleGrid.after.class?.[r]?.[c] || classifySpectralLandCover(ndviA, ndwiA, ndbiA);
+
         isVerified = !!(sampleGrid.verified?.[r]?.[c]);
         serverChangeType = sampleGrid.change_type?.[r]?.[c];
+        if (serverChangeType && (serverChangeType.includes("Construction") || serverChangeType.includes("Built") || serverChangeType.includes("Road")) && classA === "Water") {
+          serverChangeType = null;
+        }
+        if (serverChangeType && (serverChangeType.includes("Demo") || serverChangeType.includes("Built")) && (classB.includes("Soil") || classB.includes("Barren") || classB === "Water" || ndviB >= 0.10)) {
+          serverChangeType = null;
+        }
       } else {
         // Fallback to pair mean
         ndviB = pair.spectral_profile?.before?.ndvi ?? 0.25;
@@ -2974,17 +3550,32 @@ function attachCursorInspector(card, pair, idx) {
         ndviA = pair.spectral_profile?.after?.ndvi ?? 0.28;
         ndwiA = pair.spectral_profile?.after?.ndwi ?? -0.32;
         ndbiA = pair.spectral_profile?.after?.ndbi ?? 0.06;
-        classB = classify(ndviB, ndwiB, ndbiB);
-        classA = classify(ndviA, ndwiA, ndbiA);
+        classB = classifySpectralLandCover(ndviB, ndwiB, ndbiB);
+        classA = classifySpectralLandCover(ndviA, ndwiA, ndbiA);
       }
 
-      let trans = (serverChangeType && serverChangeType !== "No Change") ? serverChangeType : getTransition(classB, classA);
-      const isUnchanged = (classB === classA) || trans === "No Change" || trans.includes("Unchanged") || trans.includes("Seasonal Phenology");
+      let trans = (serverChangeType && serverChangeType !== "No Change") ? serverChangeType : getSpectralTransition(classB, classA);
+      if (classB === "Water" && classA === "Water") {
+        trans = "Unchanged Surface (Water Body)";
+      }
+      if (trans.includes("Demolition") && (classB.includes("Bare Soil") || classB.includes("Land") || classB === "Water" || ndviB >= 0.10)) {
+        trans = classA.includes("Vegetation") ? "🌱 Seasonal Greening (Normal Land)" : "Unchanged Surface";
+      }
+      if ((trans.includes("Construction") || trans.includes("Built") || trans.includes("Road")) && classA === "Water") {
+        trans = "Unchanged Surface (Water Body)";
+      }
+      const isUnchanged = (classB === classA) || trans === "No Change" || trans.includes("Unchanged") || trans.includes("Seasonal Phenology") || trans.includes("Seasonal Greening");
 
       let displayTrans = trans;
       let transColor = "#fbbf24";
       if (isUnchanged || !isVerified) {
-        displayTrans = "🚫 Unchanged Surface (Excluded from Verified Mask)";
+        if (classB === "Water" && classA === "Water") {
+          displayTrans = "🚫 Unchanged Surface (Water Body — Excluded from Verified Mask)";
+        } else if (trans.includes("Seasonal Greening")) {
+          displayTrans = "🌱 Seasonal Greening (Normal Land — Excluded)";
+        } else {
+          displayTrans = "🚫 Unchanged Surface (Excluded from Verified Mask)";
+        }
         transColor = "#94a3b8";
       } else {
         displayTrans = "⚡ Verified: " + trans;

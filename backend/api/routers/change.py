@@ -6,6 +6,7 @@ Resolves multi-temporal change pairs using per-pixel bad-mask exclusion
 rather than coarse whole-tile discard.
 """
 
+import os
 import json
 import logging
 from typing import Dict, Any, Optional, List
@@ -380,6 +381,13 @@ def analyze_sequence(request: SequenceAnalysisRequest):
                 "file_path": r["file_path"],
                 "bad_mask_path": r["bad_mask_path"]
             })
+
+        missing_files = [s["file_path"] for s in snapshots if s.get("file_path") and not os.path.exists(s["file_path"])]
+        if missing_files:
+            raise HTTPException(
+                status_code=404,
+                detail=f"GeoTIFF tile files missing on disk: {missing_files[:2]}"
+            )
 
         logger.info(f"Running multi-temporal change orchestrator for site '{request.site_key}' with {len(snapshots)} snapshots")
         orchestrator = SequenceOrchestrator()

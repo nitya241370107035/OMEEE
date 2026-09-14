@@ -31,9 +31,11 @@ from backend.services.change_engine.spectral_classifier import (
     classify_pixels,
     CLASS_WATER,
     CLASS_DENSE_VEGETATION,
+    CLASS_SPARSE_VEGETATION,
     CLASS_MODERATE_VEGETATION,
     CLASS_BUILT_UP,
     CLASS_BARE_SOIL,
+    CLASS_CONFUSION,
     CLASS_UNCLASSIFIED,
 )
 from backend.services.change_engine.semantic_change_filter import (
@@ -41,7 +43,15 @@ from backend.services.change_engine.semantic_change_filter import (
 )
 from backend.services.change_engine.change_type_rules import (
     vectorized_change_type_lookup,
+    format_transition_label,
     MAJOR_CHANGE_TYPES,
+    TYPE_WATER_EXPANSION,
+    TYPE_WATER_SHRINKAGE,
+    TYPE_CONSTRUCTION,
+    TYPE_CLEARANCE,
+    TYPE_ROAD_DEVELOPMENT,
+    TYPE_DEMOLITION,
+    TYPE_VEGETATION_LARGE_SCALE,
 )
 from backend.services.change_engine.vectorizer import (
     polygonize_change_mask,
@@ -64,17 +74,19 @@ def draw_bounding_squares(base_img: Image.Image, boxes: Optional[List[Dict[str, 
     w, h = img_out.size
 
     TYPE_COLORS = {
-        "Construction": (245, 158, 11, 255),       # Amber #f59e0b
-        "Road Development": (168, 85, 247, 255),   # Purple #a855f7
-        "Clearance": (244, 63, 94, 255),           # Rose #f43f5e
+        "Construction": (239, 68, 68, 255),                       # Reddish #ef4444
+        "Road Development": (168, 85, 247, 255),                   # Purple #a855f7
+        "Clearance": (253, 224, 71, 255),                           # Light Yellow #fde047
         "Water-Extent Variation (shrinkage)": (6, 182, 212, 255), # Cyan #06b6d4
-        "Water-Extent Variation (expansion)": (6, 182, 212, 255),
+        "Water-Extent Variation (expansion)": (56, 189, 248, 255), # Blue #38bdf8
+        "Water Extension": (56, 189, 248, 255),                    # Blue #38bdf8
         "Demolition / Reversion": (251, 146, 60, 255),            # Orange #fb923c
+        "Vegetation Shift (Large Scale)": (16, 185, 129, 255),    # Emerald #10b981
     }
 
     for b in boxes:
         c_type = b.get("change_type", "Construction")
-        color = TYPE_COLORS.get(c_type, (245, 158, 11, 255))
+        color = TYPE_COLORS.get(c_type, (239, 68, 68, 255))
         fill_color = (color[0], color[1], color[2], 40)
 
         norm = b.get("box_pct", {})
@@ -106,48 +118,69 @@ def rgb_to_png_base64(rgb: np.ndarray, max_dim: int = 384, boxes: Optional[List[
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def ndvi_to_png_base64(ndvi: np.ndarray, max_dim: int = 384, boxes: Optional[List[Dict[str, Any]]] = None) -> str:
-    """Maps continuous NDVI [-1.0, 1.0] to a standard colorized band map and base64 PNG.
-    
-    Ramp:
-    < 0.0: Water / Shadow (Deep Blue: #1e3a8a)
-    0.0 - 0.2: Built-up / Barren (Tan / Ochre: #d97706)
-    0.2 - 0.5: Moderate / Sparse Vegetation (Lime / Yellow-Green: #84cc16)
-    > 0.5: Dense Healthy Canopy (Vibrant Green: #16a34a)
+def ndvi_to_png_base64(
+    ndvi: np.ndarray,
+    ndbi: Optional[np.ndarray] = None,
+    class_map: Optional[np.ndarray] = None,
+    rgb: Optional[np.ndarray] = None,
+    max_dim: int = 512,
+    boxes: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    """Maps continuous NDVI [-1.0, 1.0] to a high-grade Earth Observation scientific colormap.
+
+    Uses smooth continuous spline interpolation modulated with surface luminance texture:
+    - Water: Deep marine blue (#0c2d61) to lake azure (#1a6bb5)
+    - Built-up / Urban: Textured terracotta (#c86a3b) with architectural contrast
+    - Bare Soil / Barren: Warm golden sandstone (#dfaa6b)
+    - Sparse Vegetation: Soft spring lime / meadow (#88bd37)
+    - Dense Vegetation: Vibrant emerald to deep canopy green (#239433 -> #0f521b)
     """
     h, w = ndvi.shape
-    rgba = np.zeros((h, w, 4), dtype=np.uint8)
-    rgba[:, :, 3] = 255
+    v = np.clip(ndvi.astype(np.float32), -1.0, 1.0)
 
-    val = np.clip(ndvi, -1.0, 1.0)
+    # 1. Continuous scientific colormap knots (Piecewise continuous spline)
+    knots = [
+        (-1.00, np.array([12,  36,  90], dtype=np.float32)),   # Deep oceanic blue
+        (-0.20, np.array([22,  70, 150], dtype=np.float32)),   # Marine blue
+        (-0.02, np.array([35, 125, 195], dtype=np.float32)),   # Azure water edge
+        ( 0.00, np.array([168, 155, 142], dtype=np.float32)),  # Neutral stone / urban transition
+        ( 0.08, np.array([205, 125,  85], dtype=np.float32)),  # Warm terracotta / built-up
+        ( 0.16, np.array([225, 185, 115], dtype=np.float32)),  # Sandstone / bare soil
+        ( 0.28, np.array([185, 210,  80], dtype=np.float32)),  # Yellow-green / sparse vegetation
+        ( 0.45, np.array([105, 180,  50], dtype=np.float32)),  # Meadow / cropland
+        ( 0.65, np.array([ 35, 140,  45], dtype=np.float32)),  # Healthy canopy
+        ( 1.00, np.array([ 12,  75,  25], dtype=np.float32)),  # Deep dense forest
+    ]
 
-    # Segment 1: Water (< 0.0) -> navy to sky blue
-    w_mask = val < 0.0
-    w_ratio = np.clip((val + 1.0), 0.0, 1.0)
-    rgba[w_mask, 0] = (20 + w_ratio[w_mask] * 36).astype(np.uint8)
-    rgba[w_mask, 1] = (40 + w_ratio[w_mask] * 149).astype(np.uint8)
-    rgba[w_mask, 2] = (100 + w_ratio[w_mask] * 148).astype(np.uint8)
+    rgb_out = np.zeros((h, w, 3), dtype=np.float32)
+    for i in range(len(knots) - 1):
+        v0, c0 = knots[i]
+        v1, c1 = knots[i + 1]
+        mask = (v >= v0) & (v <= v1)
+        if not np.any(mask):
+            continue
+        t = (v[mask] - v0) / (v1 - v0)
+        t = t[:, np.newaxis]
+        rgb_out[mask] = (1.0 - t) * c0 + t * c1
 
-    # Segment 2: Bare Soil / Built-up (0.0 to 0.2) -> Tan to Sand/Gold
-    s_mask = (val >= 0.0) & (val < 0.2)
-    s_ratio = val[s_mask] / 0.2
-    rgba[s_mask, 0] = (180 + s_ratio * 54).astype(np.uint8)
-    rgba[s_mask, 1] = (120 + s_ratio * 59).astype(np.uint8)
-    rgba[s_mask, 2] = (50 - s_ratio * 42).astype(np.uint8)
+    # Respect explicit water classification from multi-spectral bands
+    if class_map is not None:
+        is_water = np.isin(class_map, [CLASS_WATER, "Water"])
+        if np.any(is_water):
+            w_t = np.clip((v[is_water] + 0.2) / 0.4, 0.0, 1.0)[:, np.newaxis]
+            rgb_out[is_water] = (1.0 - w_t) * np.array([18, 55, 125], dtype=np.float32) + w_t * np.array([28, 95, 165], dtype=np.float32)
 
-    # Segment 3: Sparse to Moderate Veg (0.2 to 0.5) -> Yellow-Green
-    m_mask = (val >= 0.2) & (val < 0.5)
-    m_ratio = (val[m_mask] - 0.2) / 0.3
-    rgba[m_mask, 0] = (163 - m_ratio * 129).astype(np.uint8)
-    rgba[m_mask, 1] = (230 - m_ratio * 33).astype(np.uint8)
-    rgba[m_mask, 2] = (53 + m_ratio * 41).astype(np.uint8)
+    # 2. Surface Luminance Modulation (Pan-sharpening texture from true reflectance)
+    if rgb is not None:
+        rgb_f = rgb.astype(np.float32) / 255.0
+        lum = 0.299 * rgb_f[:,:,0] + 0.587 * rgb_f[:,:,1] + 0.114 * rgb_f[:,:,2]
+        p2, p98 = np.percentile(lum, 2), np.percentile(lum, 98)
+        lum_norm = np.clip((lum - p2) / (p98 - p2 + 1e-5), 0.0, 1.0)
+        shading = 0.72 + 0.38 * lum_norm
+        rgb_out = rgb_out * shading[:, :, np.newaxis]
 
-    # Segment 4: Dense Veg (>= 0.5) -> Deep Lush Forest
-    d_mask = val >= 0.5
-    d_ratio = np.clip((val[d_mask] - 0.5) / 0.5, 0.0, 1.0)
-    rgba[d_mask, 0] = (34 - d_ratio * 30).astype(np.uint8)
-    rgba[d_mask, 1] = (197 - d_ratio * 77).astype(np.uint8)
-    rgba[d_mask, 2] = (94 - d_ratio * 7).astype(np.uint8)
+    rgb_out = np.clip(rgb_out, 0, 255).astype(np.uint8)
+    rgba = np.dstack([rgb_out, np.full((h, w), 255, dtype=np.uint8)])
 
     img = Image.fromarray(rgba, mode="RGBA")
     if h > max_dim or w > max_dim:
@@ -157,6 +190,32 @@ def ndvi_to_png_base64(ndvi: np.ndarray, max_dim: int = 384, boxes: Optional[Lis
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def ndvi_delta_to_png_base64(delta_ndvi: np.ndarray, max_dim: int = 512) -> str:
+    """Generates a high-contrast difference map highlighting vegetation loss / gain."""
+    h, w = delta_ndvi.shape
+    v = np.clip(delta_ndvi.astype(np.float32), -0.4, 0.4)
+    rgb_out = np.zeros((h, w, 3), dtype=np.uint8)
+
+    # Negative delta (Loss / Construction) -> Bright Crimson Red
+    neg_mask = v < 0.0
+    t_neg = (-v[neg_mask] / 0.4)[:, np.newaxis]
+    rgb_out[neg_mask] = (1.0 - t_neg) * np.array([28, 32, 42]) + t_neg * np.array([239, 68, 68])
+
+    # Positive delta (Regrowth / Gain) -> Vibrant Emerald
+    pos_mask = v >= 0.0
+    t_pos = (v[pos_mask] / 0.4)[:, np.newaxis]
+    rgb_out[pos_mask] = (1.0 - t_pos) * np.array([28, 32, 42]) + t_pos * np.array([34, 197, 94])
+
+    rgba = np.dstack([rgb_out, np.full((h, w), 255, dtype=np.uint8)])
+    img = Image.fromarray(rgba, mode="RGBA")
+    if h > max_dim or w > max_dim:
+        img = img.resize((max_dim, max_dim), Image.Resampling.BILINEAR)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
 
 
 def mask_to_png_base64(mask: np.ndarray, color=(6, 182, 212), max_dim: int = 384) -> str:
@@ -186,13 +245,14 @@ def classified_map_to_png_base64(
 ) -> str:
     """Renders a colorized classification map ONLY for the region where mask > 0.
 
-    User Color Mapping:
-    - Dense Vegetation: Dark Green (21, 128, 61) / #15803d
-    - Moderate / Sparse Veg: Light Green / Olive (132, 204, 22) / #84cc16
-    - Bare Soil / Barren Land: Earth Brown (146, 64, 14) / #92400e
-    - Built-up / Urban: Amber / Gold (245, 158, 11) / #f59e0b
+    6-Class Color Mapping:
+    - Dense Vegetation: Dark Forest Green (21, 128, 61) / #15803d
+    - Sparse Vegetation: Light Olive Green (132, 204, 22) / #84cc16
+    - Bare Soil / Open Land: Earth Brown (146, 64, 14) / #92400e
+    - Built-up: Crimson Red (239, 68, 68) / #ef4444
+    - Built-up / Bare-land Confusion: Amber Warning / Sand (234, 179, 8) / #eab308
     - Water: Deep Blue (2, 132, 199) / #0284c7
-    - Unclassified: Slate (148, 163, 184)
+    - Unclassified / Other: Slate (148, 163, 184)
     - Outside Changed Mask: Muted Dark Background (7, 10, 18, 230)
     """
     h, w = class_map.shape
@@ -207,27 +267,31 @@ def classified_map_to_png_base64(
     bool_mask = mask > 0
 
     if np.any(bool_mask):
-        # 1. Dense Vegetation -> Dark Green
+        # 1. Dense Vegetation -> Dark Forest Green
         is_dense = bool_mask & (class_map == CLASS_DENSE_VEGETATION)
         rgba[is_dense] = (21, 128, 61, 255)
 
-        # 2. Moderate / Sparse Veg -> Light Green
-        is_mod = bool_mask & (class_map == CLASS_MODERATE_VEGETATION)
-        rgba[is_mod] = (132, 204, 22, 255)
+        # 2. Sparse Veg -> Light Olive Green
+        is_sparse = bool_mask & np.isin(class_map, [CLASS_SPARSE_VEGETATION, CLASS_MODERATE_VEGETATION, "Moderate / Sparse Vegetation", "Sparse Vegetation"])
+        rgba[is_sparse] = (132, 204, 22, 255)
 
-        # 3. Bare Soil / Land -> Earth Brown
-        is_soil = bool_mask & (class_map == CLASS_BARE_SOIL)
+        # 3. Bare Soil / Open Land -> Earth Brown
+        is_soil = bool_mask & np.isin(class_map, [CLASS_BARE_SOIL, "Bare Soil / Barren", "Bare Soil / Open Land", "Bare Soil"])
         rgba[is_soil] = (146, 64, 14, 255)
 
-        # 4. Built-up / Urban -> Amber / Gold
-        is_urban = bool_mask & (class_map == CLASS_BUILT_UP)
-        rgba[is_urban] = (245, 158, 11, 255)
+        # 4. Built-up -> Crimson Red
+        is_built = bool_mask & np.isin(class_map, [CLASS_BUILT_UP, "Built-up / Urban", "Built-up"])
+        rgba[is_built] = (239, 68, 68, 255)
 
-        # 5. Water -> Deep Blue
+        # 5. Built-up / Bare-land Confusion -> Amber Sand
+        is_conf = bool_mask & (class_map == CLASS_CONFUSION)
+        rgba[is_conf] = (234, 179, 8, 255)
+
+        # 6. Water -> Deep Blue
         is_water = bool_mask & (class_map == CLASS_WATER)
         rgba[is_water] = (2, 132, 199, 255)
 
-        # 6. Unclassified / Other -> Slate
+        # 7. Unclassified / Other -> Slate
         is_unclass = bool_mask & (class_map == CLASS_UNCLASSIFIED)
         rgba[is_unclass] = (148, 163, 184, 255)
 
@@ -240,36 +304,134 @@ def classified_map_to_png_base64(
 
 
 
+def sanitize_cloud_mask(bad_mask: np.ndarray, blue: np.ndarray, red: np.ndarray) -> np.ndarray:
+    """Sanitizes false-positive cloud masks caused by s2cloudless flagging bright sunny terrain/sand."""
+    if not np.any(bad_mask):
+        return bad_mask
+    bad_frac = float(np.mean(bad_mask))
+    if bad_frac > 0.50:
+        mean_blue = float(np.mean(blue[bad_mask]))
+        # True clouds have high Blue reflectance (> 0.30 - 0.70). Sunny dry desert sand/ground has Blue < 0.28
+        if mean_blue < 0.30:
+            logger.info(f"Detected false-positive cloud mask over bright terrain (bad_frac={bad_frac:.2f}, mean_blue={mean_blue:.3f}). Sanitizing mask.")
+            # Keep only genuine cloud pixels (high blue AND high red reflectance)
+            true_clouds = bad_mask & (blue > 0.35) & (red > 0.30)
+            return true_clouds
+    return bad_mask
+
+
 def load_bands_and_masks(
     file_path: str,
     mask_path: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Loads Green (B03), Red (B04), NIR (B08), SWIR (B11) and bad pixel mask from disk."""
+    """Loads Green (B03), Red (B04), NIR (B08), SWIR (B11) and bad pixel mask from disk.
+
+    Dynamically maps band names by inspecting ds.descriptions and directory manifest.json,
+    supporting arbitrary 3, 4, 9, or multi-band GeoTIFFs.
+    """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Tile not found: {file_path}")
+
+    import json
 
     with rasterio.open(file_path) as ds:
         transform = ds.transform
         profile = ds.profile
         count = ds.count
 
-        if count >= 9:
-            # Standard AeroLens Sentinel-2 9-band stack
-            # ('B01', 'B02', 'B03', 'B04', 'B05', 'B08', 'B8A', 'B11', 'B12')
-            blue = ds.read(2)
-            green = ds.read(3)
-            red = ds.read(4)
-            nir = ds.read(6)
-            swir = ds.read(8)
-        elif count >= 4:
-            blue = ds.read(1)
-            green = ds.read(2)
-            red = ds.read(3)
-            nir = ds.read(4)
-            swir = nir
-        else:
-            b1 = ds.read(1)
-            blue, green, red, nir, swir = b1, b1, b1, b1, b1
+        # Extract descriptions or fallback to manifest.json
+        descriptions = list(ds.descriptions or [])
+        manifest_band_order = []
+        manifest_path = os.path.join(os.path.dirname(file_path), "manifest.json")
+        if os.path.exists(manifest_path):
+            try:
+                with open(manifest_path, "r", encoding="utf-8") as mf:
+                    mdata = json.load(mf)
+                    tiles = mdata.get("tiles", [])
+                    base_name = os.path.basename(file_path)
+                    for t in tiles:
+                        if base_name in str(t.get("storage", {}).get("geotiff_path", "")) or base_name in str(t.get("tile_id", "")):
+                            manifest_band_order = t.get("bands", {}).get("band_order", [])
+                            break
+                    if not manifest_band_order and tiles:
+                        manifest_band_order = tiles[0].get("bands", {}).get("band_order", [])
+            except Exception:
+                manifest_band_order = []
+
+        # Build band dict
+        raw_bands = {}
+        for idx in range(1, count + 1):
+            desc_name = ""
+            if idx - 1 < len(descriptions) and descriptions[idx - 1]:
+                desc_name = str(descriptions[idx - 1]).strip().upper()
+            elif idx - 1 < len(manifest_band_order) and manifest_band_order[idx - 1]:
+                desc_name = str(manifest_band_order[idx - 1]).strip().upper()
+            else:
+                desc_name = f"B{idx}"
+
+            arr = ds.read(idx).astype(np.float32)
+            # Normalize DN to reflectance [0.0, 1.5] if fixed 10000 scale
+            if np.nanmax(arr) > 10.0:
+                arr = np.clip(arr / 10000.0, 0.0, 1.5)
+            raw_bands[desc_name] = arr
+            raw_bands[f"INDEX_{idx}"] = arr
+
+        # Intelligent semantic mapping
+        # 1. NIR: B08, B8, B8A, NIR
+        nir = None
+        for k in ["B08", "B8", "B8A", "NIR", "BAND_8", "BAND_8A"]:
+            if k in raw_bands:
+                nir = raw_bands[k]
+                break
+        if nir is None:
+            if count >= 6: nir = raw_bands.get("INDEX_6")
+            elif count >= 4: nir = raw_bands.get(f"INDEX_{count}")
+            elif "B8A" in raw_bands: nir = raw_bands["B8A"]
+            else: nir = raw_bands["INDEX_1"]
+
+        # 2. SWIR: B11, B12, SWIR
+        swir = None
+        for k in ["B11", "B12", "SWIR", "SWIR1", "SWIR2", "BAND_11", "BAND_12"]:
+            if k in raw_bands:
+                swir = raw_bands[k]
+                break
+        if swir is None:
+            if count >= 8: swir = raw_bands.get("INDEX_8")
+            else: swir = nir
+
+        # 3. RED: B04, B4, RED, or B05 proxy
+        red = None
+        for k in ["B04", "B4", "RED", "BAND_4"]:
+            if k in raw_bands:
+                red = raw_bands[k]
+                break
+        if red is None:
+            if "B05" in raw_bands: red = raw_bands["B05"]  # Red Edge 1 proxy
+            elif count >= 4: red = raw_bands.get("INDEX_3")
+            elif count == 3 and "B01" not in raw_bands: red = raw_bands["INDEX_1"]
+            elif "B01" in raw_bands: red = raw_bands["B01"]
+            else: red = raw_bands["INDEX_1"]
+
+        # 4. BLUE: B02, B2, BLUE, or B01
+        blue = None
+        for k in ["B02", "B2", "BLUE", "BAND_2"]:
+            if k in raw_bands:
+                blue = raw_bands[k]
+                break
+        if blue is None:
+            if "B01" in raw_bands: blue = raw_bands["B01"]
+            elif count >= 3: blue = raw_bands.get("INDEX_1") if count >= 4 else raw_bands.get("INDEX_3")
+            else: blue = raw_bands["INDEX_1"]
+
+        # 5. GREEN: B03, B3, GREEN
+        green = None
+        for k in ["B03", "B3", "GREEN", "BAND_3"]:
+            if k in raw_bands:
+                green = raw_bands[k]
+                break
+        if green is None:
+            if count >= 3: green = raw_bands.get("INDEX_2")
+            else: green = (red + blue) / 2.0
 
     # Load bad pixel / cloud mask if present
     h, w = red.shape
@@ -279,8 +441,26 @@ def load_bands_and_masks(
     else:
         bad_mask = np.zeros((h, w), dtype=bool)
 
+    # Sanitize false-positive cloud masks on bright terrain
+    bad_mask = sanitize_cloud_mask(bad_mask, blue, red)
+
     # Pre-render normalized RGB for ChangeFormer
-    rgb = normalize_sentinel_rgb(red, green, blue)
+    # Check if a visual thumbnail already exists on disk alongside the tile
+    thumb_path = file_path.replace(".tif", "_thumb.jpg")
+    if not os.path.exists(thumb_path):
+        thumb_path = file_path.replace(".tif", "_thumb.png")
+
+    if os.path.exists(thumb_path):
+        try:
+            with Image.open(thumb_path) as t_img:
+                rgb = np.array(t_img.convert("RGB"))
+                if rgb.shape[:2] != (h, w):
+                    t_img = t_img.resize((w, h), Image.Resampling.BILINEAR)
+                    rgb = np.array(t_img)
+        except Exception:
+            rgb = normalize_sentinel_rgb(red, green, blue)
+    else:
+        rgb = normalize_sentinel_rgb(red, green, blue)
 
     return {
         "blue": blue,
@@ -370,8 +550,14 @@ class SequenceOrchestrator:
         candidate_binary_mask = ((raw_neural_mask > 0) | spectral_cva_mask) & valid_pixels
 
         # Step 7: Spectral classification (Vegetation, Water, Urban/Built-up, Bare Soil)
-        class_before_map = classify_pixels(indices_b["ndvi"], indices_b["ndwi"], indices_b["ndbi"])
-        class_after_map = classify_pixels(indices_a["ndvi"], indices_a["ndwi"], indices_a["ndbi"])
+        class_before_map = classify_pixels(
+            indices_b["ndvi"], indices_b["ndwi"], indices_b["ndbi"],
+            b_nir=data_b["nir"], b_red=data_b["red"], b_swir=data_b["swir"],
+        )
+        class_after_map = classify_pixels(
+            indices_a["ndvi"], indices_a["ndwi"], indices_a["ndbi"],
+            b_nir=data_a["nir"], b_red=data_a["red"], b_swir=data_a["swir"],
+        )
 
         # Step 8: Semantic Contradiction Filtering
         # User rule: "if in binary masked showing pixel changes but bands telling nothing is changed then dont include that pixel in change"
@@ -438,35 +624,195 @@ class SequenceOrchestrator:
         filter_stats["verified_changes"] = changed_pixels
         filter_stats["false_positives_rejected"] = fp_rejected
 
-        # Collect major change boxes for drawing on After images
-        change_boxes = [
-            {
+        # Step: Rigorous Water Extent Calculation and Proof Verification
+        # Water pixels: NDVI < 0.0 or classified as Water (blue in NDVI map)
+        water_mask_b = (indices_b["ndvi"] < 0.0) | (class_before_map == CLASS_WATER)
+        water_mask_a = (indices_a["ndvi"] < 0.0) | (class_after_map == CLASS_WATER)
+        water_px_before = int(np.sum(water_mask_b))
+        water_px_after = int(np.sum(water_mask_a))
+        water_px_delta = water_px_after - water_px_before
+
+        # Pixels that previously were NOT blue/water, but are NOW blue/water
+        new_blue_pixels = (~water_mask_b) & water_mask_a
+        new_water_count = int(np.sum(new_blue_pixels))
+
+        # USER RULE: 4-5 pixels is noise and does NOT mean water is extended (requires proof)
+        # Confirmed threshold: at least 25 contiguous pixels (approx 2,500 m2)
+        MIN_WATER_PROOF_PX = 25
+        is_water_extension_proven = (water_px_delta > 0) and (new_water_count >= MIN_WATER_PROOF_PX)
+        is_water_shrinkage_proven = (water_px_delta < -MIN_WATER_PROOF_PX)
+
+        water_proof_text = ""
+        if is_water_extension_proven:
+            water_proof_text = (
+                f"Water Extent Expansion Verified: +{water_px_delta} blue pixels "
+                f"(+{round(water_px_delta * 100 / 10000.0, 2)} ha). "
+                f"Before: {water_px_before:,} px → After: {water_px_after:,} px (>{MIN_WATER_PROOF_PX} px proof threshold)."
+            )
+        elif is_water_shrinkage_proven:
+            water_proof_text = (
+                f"Water Extent Shrinkage: {water_px_delta} blue pixels "
+                f"({round(water_px_delta * 100 / 10000.0, 2)} ha). "
+                f"Before: {water_px_before:,} px → After: {water_px_after:,} px."
+            )
+        else:
+            water_proof_text = (
+                f"Water Extent Stable / Unchanged: Δ {water_px_delta:+d} px "
+                f"(Baseline: {water_px_before:,} px vs After: {water_px_after:,} px; below {MIN_WATER_PROOF_PX} px threshold)."
+            )
+
+        water_extent_stats = {
+            "before_pixels": water_px_before,
+            "after_pixels": water_px_after,
+            "delta_pixels": water_px_delta,
+            "new_water_pixels": new_water_count,
+            "is_extension_proven": is_water_extension_proven,
+            "is_shrinkage_proven": is_water_shrinkage_proven,
+            "status": "Extended" if is_water_extension_proven else ("Shrunk" if is_water_shrinkage_proven else "Stable"),
+            "proof": water_proof_text,
+        }
+
+        # Collect major change boxes for drawing on images
+        # Filter strictly for genuine structural changes (minimum 20 px / 2,000 m2)
+        raw_boxes = []
+        for i, f in enumerate(features):
+            props = f.get("properties", {})
+            c_type = props.get("change_type")
+            if c_type not in MAJOR_CHANGE_TYPES:
+                continue
+
+            area_m2 = float(props.get("area_m2", 0) or props.get("area_sq_m", 0) or 0)
+            if area_m2 < 1000.0:
+                continue
+
+            # If water expansion/shrinkage is NOT proven (e.g. 4-5 px noise), suppress it from change boxes
+            if c_type == TYPE_WATER_EXPANSION and not is_water_extension_proven:
+                continue
+            if c_type == TYPE_WATER_SHRINKAGE and not is_water_shrinkage_proven:
+                continue
+
+            b_class = props.get("before_class", "Land")
+            a_class = props.get("after_class", "Built-up")
+            t_label = props.get("transition_label") or format_transition_label(b_class, a_class, c_type)
+
+            raw_boxes.append({
                 "id": i + 1,
-                "change_type": f["properties"]["change_type"],
-                "area_m2": f["properties"].get("area_m2", 0),
-                "box_pct": f["properties"].get("box_pct", {}),
-                "pixel_bbox": f["properties"].get("pixel_bbox", []),
+                "change_type": c_type,
+                "transition_label": t_label,
+                "before_class": b_class,
+                "after_class": a_class,
+                "area_m2": area_m2,
+                "box_pct": props.get("box_pct", {}),
+                "pixel_bbox": props.get("pixel_bbox", []),
+                "proof": water_proof_text if "water" in c_type.lower() else None,
+            })
+
+        # Sort candidate boxes by area descending
+        raw_boxes.sort(key=lambda b: b.get("area_m2", 0), reverse=True)
+
+        # Spatial Non-Maximum Suppression (NMS) to eliminate overlapping duplicate clutter
+        def _calc_box_iou(b1, b2):
+            p1 = b1.get("box_pct", {})
+            p2 = b2.get("box_pct", {})
+            if not p1 or not p2:
+                return 0.0
+            x1 = max(p1.get("x", 0), p2.get("x", 0))
+            y1 = max(p1.get("y", 0), p2.get("y", 0))
+            x2 = min(p1.get("x", 0) + p1.get("w", 0), p2.get("x", 0) + p2.get("w", 0))
+            y2 = min(p1.get("y", 0) + p1.get("h", 0), p2.get("y", 0) + p2.get("h", 0))
+            inter_w = max(0.0, x2 - x1)
+            inter_h = max(0.0, y2 - y1)
+            inter_area = inter_w * inter_h
+            if inter_area <= 0:
+                return 0.0
+            area1 = p1.get("w", 0) * p1.get("h", 0)
+            area2 = p2.get("w", 0) * p2.get("h", 0)
+            union_area = area1 + area2 - inter_area
+            return inter_area / union_area if union_area > 0 else 0.0
+
+        suppressed_boxes = []
+        for cand in raw_boxes:
+            if any(_calc_box_iou(cand, kept) > 0.35 for kept in suppressed_boxes):
+                continue
+            suppressed_boxes.append(cand)
+            if len(suppressed_boxes) >= 8:
+                break
+
+        # Consolidate water boxes to at most 1 clean comprehensive box per pair to prevent multiple tags along the same river
+        water_boxes = [b for b in suppressed_boxes if "water" in b.get("change_type", "").lower()]
+        non_water_boxes = [b for b in suppressed_boxes if "water" not in b.get("change_type", "").lower()]
+
+        if len(water_boxes) > 1:
+            primary_water = dict(water_boxes[0])
+            total_water_area = sum(b.get("area_m2", 0) for b in water_boxes)
+            primary_water["area_m2"] = round(total_water_area, 1)
+            x_min = min(b["box_pct"]["x"] for b in water_boxes)
+            y_min = min(b["box_pct"]["y"] for b in water_boxes)
+            x_max = max(b["box_pct"]["x"] + b["box_pct"]["w"] for b in water_boxes)
+            y_max = max(b["box_pct"]["y"] + b["box_pct"]["h"] for b in water_boxes)
+            primary_water["box_pct"] = {
+                "x": round(x_min, 2),
+                "y": round(y_min, 2),
+                "w": round(min(100.0 - x_min, x_max - x_min), 2),
+                "h": round(min(100.0 - y_min, y_max - y_min), 2),
             }
-            for i, f in enumerate(features)
-            if f.get("properties", {}).get("change_type") in MAJOR_CHANGE_TYPES
-        ]
+            water_boxes = [primary_water]
+
+        change_boxes = (water_boxes + non_water_boxes)[:8]
+
+        # If water extension is proven, ensure exactly 1 clean consolidated box for the new water area
+        if is_water_extension_proven:
+            has_water = any("water" in b.get("change_type", "").lower() and "exp" in b.get("change_type", "").lower() for b in change_boxes)
+            if not has_water and new_water_count >= MIN_WATER_PROOF_PX:
+                r_indices, c_indices = np.where(new_blue_pixels)
+                r_min, r_max = int(np.min(r_indices)), int(np.max(r_indices))
+                c_min, c_max = int(np.min(c_indices)), int(np.max(c_indices))
+                bw = max(4, c_max - c_min)
+                bh = max(4, r_max - r_min)
+                water_box = {
+                    "id": len(change_boxes) + 1,
+                    "change_type": TYPE_WATER_EXPANSION,
+                    "transition_label": "Land → Water (Extension)",
+                    "before_class": "Land",
+                    "after_class": "Water",
+                    "area_m2": round(float(new_water_count * 100.0), 1),
+                    "box_pct": {
+                        "x": round((c_min / w) * 100.0, 2),
+                        "y": round((r_min / h) * 100.0, 2),
+                        "w": round((bw / w) * 100.0, 2),
+                        "h": round((bh / h) * 100.0, 2),
+                    },
+                    "pixel_bbox": [c_min, r_min, c_max, r_max],
+                    "proof": water_proof_text,
+                }
+                change_boxes.insert(0, water_box)
+                change_boxes = change_boxes[:8]
 
         # Per-pixel colorized land-cover maps for Before and After
         classified_b_png = classified_map_to_png_base64(class_before_map, mask=surviving_mask)
         classified_a_png = classified_map_to_png_base64(class_after_map, mask=surviving_mask)
 
-        # Standard band previews and annotated previews with change squares
+        # Standard band previews and annotated previews with change squares (User specified: BOTH Before and After)
         rgb_b_png = rgb_to_png_base64(data_b["rgb"])
         rgb_a_png = rgb_to_png_base64(data_a["rgb"])
+        rgb_b_annotated_png = rgb_to_png_base64(data_b["rgb"], boxes=change_boxes)
         rgb_a_annotated_png = rgb_to_png_base64(data_a["rgb"], boxes=change_boxes)
-        ndvi_b_png = ndvi_to_png_base64(indices_b["ndvi"])
-        ndvi_a_png = ndvi_to_png_base64(indices_a["ndvi"])
-        ndvi_a_annotated_png = ndvi_to_png_base64(indices_a["ndvi"], boxes=change_boxes)
+
+        # High-Fidelity Scientific Continuous NDVI maps with pan-sharpened surface texture
+        ndvi_b_png = ndvi_to_png_base64(indices_b["ndvi"], ndbi=indices_b.get("ndbi"), class_map=class_before_map, rgb=data_b.get("rgb"))
+        ndvi_a_png = ndvi_to_png_base64(indices_a["ndvi"], ndbi=indices_a.get("ndbi"), class_map=class_after_map, rgb=data_a.get("rgb"))
+        ndvi_b_annotated_png = ndvi_to_png_base64(indices_b["ndvi"], ndbi=indices_b.get("ndbi"), class_map=class_before_map, rgb=data_b.get("rgb"), boxes=change_boxes)
+        ndvi_a_annotated_png = ndvi_to_png_base64(indices_a["ndvi"], ndbi=indices_a.get("ndbi"), class_map=class_after_map, rgb=data_a.get("rgb"), boxes=change_boxes)
+
+        # High-Contrast Delta NDVI Difference Map (Loss vs Gain)
+        delta_ndvi = indices_a["ndvi"] - indices_b["ndvi"]
+        ndvi_delta_png = ndvi_delta_to_png_base64(delta_ndvi)
+
         raw_mask_png = mask_to_png_base64(candidate_binary_mask, color=(6, 182, 212))
         filtered_mask_png = mask_to_png_base64(surviving_mask, color=(245, 158, 11))
 
-        # Step 13: Sample 64x64 spatial index grid for live cursor hover inspection
-        grid_step = max(1, h // 64)
+        # Step 13: Sample 128x128 spatial index grid for live cursor hover inspection
+        grid_step = max(1, h // 128)
         ndvi_b_sample = np.round(indices_b["ndvi"][::grid_step, ::grid_step], 3).tolist()
         ndwi_b_sample = np.round(indices_b["ndwi"][::grid_step, ::grid_step], 3).tolist()
         ndbi_b_sample = np.round(indices_b["ndbi"][::grid_step, ::grid_step], 3).tolist()
@@ -510,11 +856,17 @@ class SequenceOrchestrator:
             "changed_pixels": changed_pixels,
             "rgb_before_url": rgb_b_png,
             "rgb_after_url": rgb_a_png,
+            "rgb_before_annotated_url": rgb_b_annotated_png,
             "rgb_after_annotated_url": rgb_a_annotated_png,
             "ndvi_before_url": ndvi_b_png,
             "ndvi_after_url": ndvi_a_png,
+            "before_ndvi_url": ndvi_b_png,
+            "after_ndvi_url": ndvi_a_png,
+            "ndvi_before_annotated_url": ndvi_b_annotated_png,
             "ndvi_after_annotated_url": ndvi_a_annotated_png,
+            "ndvi_delta_url": ndvi_delta_png,
             "change_boxes": change_boxes,
+            "water_extent_stats": water_extent_stats,
             "binary_mask_url": raw_mask_png,
             "filtered_mask_url": filtered_mask_png,
             "classified_before_url": classified_b_png,

@@ -692,19 +692,19 @@
       flex-wrap: wrap; gap: 10px;
     }
 
-    /* â”€â”€ 6-Panel Band Matrix Grid â€” Full Width, 3+3 Layout â”€â”€â”€â”€â”€ */
+    /* ── 4-Panel Multi-Band Matrix Grid (RGB & NDVI Comparison) ── */
     .mask-hex-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 16px;
       width: 100%;
     }
 
-    @media (max-width: 1100px) {
-      .mask-hex-grid { grid-template-columns: repeat(2, 1fr); }
+    @media (min-width: 1400px) {
+      .mask-hex-grid { grid-template-columns: repeat(4, 1fr); }
     }
 
-    @media (max-width: 800px) {
+    @media (max-width: 768px) {
       .mask-hex-grid { grid-template-columns: 1fr; }
     }
 
@@ -764,14 +764,17 @@
       user-select: none; cursor: crosshair;
     }
 
-    .mask-img-wrap img {
+    .mask-img-wrap img,
+    .mask-img-wrap canvas,
+    .ndvi-recolor-canvas {
       width: 100%; height: 100%;
       object-fit: contain; display: block;
       transition: transform 0.25s ease;
       pointer-events: none;
     }
 
-    .mask-box:hover .mask-img-wrap img {
+    .mask-box:hover .mask-img-wrap img,
+    .mask-box:hover .mask-img-wrap canvas {
       transform: scale(1.03);
     }
 
@@ -827,11 +830,33 @@
     .change-square-tag {
       position: absolute; bottom: 100%; left: -1px;
       background: #f59e0b; color: #030712;
-      font-weight: 800; font-size: 8px; line-height: 1;
+      font-weight: 800; font-size: 7.5px; line-height: 1;
       padding: 2px 5px; border-radius: 3px 3px 0 0;
       white-space: nowrap; text-transform: uppercase;
-      letter-spacing: 0.04em; pointer-events: none;
-      box-shadow: 0 -2px 6px rgba(0,0,0,0.4);
+      letter-spacing: 0.03em; pointer-events: none;
+      box-shadow: 0 -2px 6px rgba(0,0,0,0.5);
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+
+    .change-square-tag.hover-only {
+      opacity: 0;
+      transform: translateY(2px);
+    }
+
+    .change-square-box:hover .change-square-tag.hover-only {
+      opacity: 1;
+      transform: translateY(0);
+      z-index: 35;
+    }
+
+    .change-square-tag.always-visible {
+      opacity: 0.92;
+    }
+
+    .change-square-box:hover .change-square-tag.always-visible {
+      opacity: 1;
+      transform: scale(1.05);
+      z-index: 35;
     }
 
     /* â”€â”€ Filter Audit Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
@@ -1359,7 +1384,8 @@
 
     .class-dense-veg   { background: rgba(16,185,129,0.18); border: 1px solid #10b981; color: #6ee7b7; }
     .class-mod-veg     { background: rgba(52,211,153,0.14); border: 1px solid #34d399; color: #a7f3d0; }
-    .class-built-up    { background: rgba(245,158,11,0.18); border: 1px solid #f59e0b; color: #fde68a; }
+    .class-built-up    { background: rgba(239,68,68,0.18);  border: 1px solid #ef4444; color: #fca5a5; }
+    .class-confusion   { background: rgba(234,179,8,0.18);  border: 1px solid #eab308; color: #fef08a; }
     .class-water       { background: rgba(6,182,212,0.18);  border: 1px solid #06b6d4; color: #67e8f9; }
     .class-bare-soil   { background: rgba(251,146,60,0.18); border: 1px solid #fb923c; color: #fed7aa; }
     .class-transitional{ background: rgba(148,163,184,0.14); border: 1px solid #94a3b8; color: #cbd5e1; }
@@ -1500,9 +1526,13 @@
       .results-split-row { grid-template-columns: 1fr; }
     }
 
-    /* â”€â”€ Theater Fullscreen Mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .mask-pair-card.theater-mode .mask-hex-grid {
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
+    }
+    @media (min-width: 1400px) {
+      .mask-pair-card.theater-mode .mask-hex-grid {
+        grid-template-columns: repeat(4, 1fr);
+      }
     }
 
     /* â”€â”€ Part 2 Bridge Box â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
@@ -1985,13 +2015,13 @@
                       </div>
                     </div>
 
-                    <!-- 2. Traditional Multi-Band Matrix View -->
+                    <!-- 2. Multi-Band Matrix View (RGB & NDVI Direct Comparison) -->
                     <div id="change-matrix-container" style="display: none;">
                       <div style="font-size: 10px; color: #94a3b8; margin-bottom: 8px;">
-                        For each consecutive interval: Before RGB, After RGB, Raw ChangeFormer Binary Mask (where), and Semantically Filtered Change Mask (what):
+                        For each consecutive interval: Before RGB, After RGB, Before NDVI, and After NDVI with direct change squares, transition labels, and water extent proof:
                       </div>
                       <div style="display:flex; flex-direction:column; gap:10px;" id="yearwise-masks-container">
-                        <!-- Dynamically populated year-wise mask quad cards -->
+                        <!-- Dynamically populated year-wise mask cards -->
                       </div>
                     </div>
                   </div>
@@ -2039,31 +2069,31 @@
     <!-- Floating Change Type Map Legend (Bottom Right) -->
     <div class="change-map-legend" id="change-map-legend" style="display: none;">
       <div style="font-size:10px; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:4px;">
-        <span>ðŸŽ¯</span> Change Classifications
+        <span>🎯</span> Change Classifications
       </div>
       <div class="change-legend-row">
         <div class="change-legend-box" style="background: rgba(239, 68, 68, 0.7); border-color: #ef4444;"></div>
-        <span>Construction (Built-up)</span>
+        <span>Vegetation → Built-up (Reddish)</span>
       </div>
       <div class="change-legend-row">
         <div class="change-legend-box" style="background: rgba(253, 224, 71, 0.7); border-color: #fde047;"></div>
-        <span>Land Clearance</span>
+        <span>Vegetation → Ground (Yellow)</span>
+      </div>
+      <div class="change-legend-row">
+        <div class="change-legend-box" style="background: rgba(56, 189, 248, 0.7); border-color: #38bdf8;"></div>
+        <span>Land → Water (Extension)</span>
       </div>
       <div class="change-legend-row">
         <div class="change-legend-box" style="background: rgba(168, 85, 247, 0.7); border-color: #a855f7;"></div>
-        <span>Road Development</span>
-      </div>
-      <div class="change-legend-row">
-        <div class="change-legend-box" style="background: rgba(6, 182, 212, 0.7); border-color: #06b6d4;"></div>
-        <span>Water-Extent Variation</span>
+        <span>Vegetation → Road</span>
       </div>
       <div class="change-legend-row">
         <div class="change-legend-box" style="background: rgba(251, 146, 60, 0.7); border-color: #fb923c;"></div>
-        <span>Demolition / Reversion</span>
+        <span>Built-up → Ground (Demolition)</span>
       </div>
       <div class="change-legend-row">
-        <div class="change-legend-box" style="background: rgba(99, 102, 241, 0.7); border-color: #6366f1;"></div>
-        <span>Unclassified Structural</span>
+        <div class="change-legend-box" style="background: rgba(16, 185, 129, 0.7); border-color: #10b981;"></div>
+        <span>Vegetation Shift (Large Scale)</span>
       </div>
     </div>
 
@@ -2114,6 +2144,6 @@
   </div>
 
   <!-- Dedicated Studio Controller -->
-  <script src="/frontend/change.js?v=20260914_uioverhaul_v14"></script>
+  <script src="/frontend/change.js?v=20260914_clean_v3"></script>
 </body>
 </html>

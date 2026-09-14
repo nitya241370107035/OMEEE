@@ -60,12 +60,21 @@ def save_sequence_results(site_key: str, analysis_result: Dict[str, Any]) -> Dic
                     "filtered_mask_url": pair.get("filtered_mask_url"),
                     "rgb_before_url": pair.get("rgb_before_url"),
                     "rgb_after_url": pair.get("rgb_after_url"),
-                    "ndvi_before_url": pair.get("ndvi_before_url"),
-                    "ndvi_after_url": pair.get("ndvi_after_url"),
+                    "rgb_before_annotated_url": pair.get("rgb_before_annotated_url"),
+                    "rgb_after_annotated_url": pair.get("rgb_after_annotated_url"),
+                    "ndvi_before_url": pair.get("before_ndvi_url") or pair.get("ndvi_before_url"),
+                    "ndvi_after_url": pair.get("after_ndvi_url") or pair.get("ndvi_after_url"),
+                    "before_ndvi_url": pair.get("before_ndvi_url") or pair.get("ndvi_before_url"),
+                    "after_ndvi_url": pair.get("after_ndvi_url") or pair.get("ndvi_after_url"),
+                    "ndvi_delta_url": pair.get("ndvi_delta_url"),
+                    "ndvi_before_annotated_url": pair.get("ndvi_before_annotated_url"),
+                    "ndvi_after_annotated_url": pair.get("ndvi_after_annotated_url"),
                     "candidate_pixels": pair.get("candidate_pixels"),
                     "false_positives_rejected": pair.get("false_positives_rejected"),
                     "changed_pixels": pair.get("changed_pixels"),
                     "change_pct": pair.get("change_pct"),
+                    "change_boxes": pair.get("change_boxes", []),
+                    "water_extent_stats": pair.get("water_extent_stats"),
                     "cursor_sample_grid": pair.get("cursor_sample_grid"),
                     "pair_spectral_profile": pair.get("spectral_profile"),
                 })
@@ -79,20 +88,31 @@ def save_sequence_results(site_key: str, analysis_result: Dict[str, Any]) -> Dic
                     area_px = int(props.get("area_px", 0))
                     area_sq_m = float(props.get("area_sq_m", 0.0))
 
+                    f_meta = {
+                        "spectral_profile": props.get("spectral_profile"),
+                        "box_pct": props.get("box_pct"),
+                        "transition_label": props.get("transition_label"),
+                        "pixel_bbox": props.get("pixel_bbox"),
+                    }
                     if f_idx == 0:
                         payload = json.dumps({
                             **json.loads(pair_meta),
-                            "spectral_profile": props.get("spectral_profile"),
+                            **f_meta,
                         })
                     else:
-                        payload = json.dumps({
-                            "spectral_profile": props.get("spectral_profile"),
-                        })
+                        payload = json.dumps(f_meta)
 
                     event_records.append((
                         site_key, t_before, t_after, d_before, d_after,
                         c_type, b_class, a_class, area_px, area_sq_m,
                         geom_json, payload
+                    ))
+                else:
+                    event_records.append((
+                        site_key, t_before, t_after, d_before, d_after,
+                        "No Change", "Stable", "Stable", 0, 0.0,
+                        json.dumps({"type": "Polygon", "coordinates": [[[0.0, 0.0], [0.0, 0.000001], [0.000001, 0.000001], [0.000001, 0.0], [0.0, 0.0]]]}),
+                        pair_meta
                     ))
 
             if event_records:
@@ -271,6 +291,9 @@ def get_saved_sequence_analysis(site_key: str) -> Optional[Dict[str, Any]]:
                     "area_px": er["area_px"],
                     "area_sq_m": er["area_sq_m"],
                     "spectral_profile": cb.get("spectral_profile"),
+                    "box_pct": cb.get("box_pct"),
+                    "transition_label": cb.get("transition_label"),
+                    "pixel_bbox": cb.get("pixel_bbox"),
                 },
                 "_meta": cb
             })
@@ -287,6 +310,136 @@ def get_saved_sequence_analysis(site_key: str) -> Optional[Dict[str, Any]]:
                     "properties": f["properties"]
                 })
 
+            # Reconstruct or auto-derive change_boxes for cached sites
+            raw_change_boxes = meta.get("change_boxes") or []
+            # Sanitize historical change boxes to eliminate false demolition on normal land
+            change_boxes = []
+            for box in raw_change_boxes:
+                b_type = str(box.get("change_type", ""))
+                b_trans = str(box.get("transition_label", ""))
+                if "Demo" in b_type or "Built-up → Ground" in b_trans:
+                    b_cls = str(box.get("before_class", ""))
+                    b_prof = box.get("spectral_profile", {}).get("before", {}) if isinstance(box.get("spectral_profile"), dict) else {}
+                    b_ndbi = b_prof.get("ndbi")
+                    b_ndvi = b_prof.get("ndvi")
+                    if "Soil" in b_cls or "Ground" in b_cls or "Barren" in b_cls or "Land" in b_cls:
+                        continue
+                    if b_ndbi is not None and (b_ndbi < 0.10 or (b_ndvi is not None and b_ndvi >= b_ndbi)):
+                        continue
+                change_boxes.append(box)
+
+            if not change_boxes and cleaned_feats:
+                # Compute site bounding envelope across all features
+                all_lons = []
+                all_lats = []
+                for cf in cleaned_feats:
+                    g = cf.get("geometry") or {}
+                    def _ext(coords):
+                        for item in coords:
+                            if isinstance(item[0], list): _ext(item)
+                            else:
+                                all_lons.append(item[0])
+                                all_lats.append(item[1])
+                    if g.get("coordinates"):
+                        _ext(g["coordinates"])
+                
+                if all_lons and all_lats:
+                    s_min_lon, s_max_lon = min(all_lons), max(all_lons)
+                    s_min_lat, s_max_lat = min(all_lats), max(all_lats)
+                    lon_span = max(s_max_lon - s_min_lon, 1e-6)
+                    lat_span = max(s_max_lat - s_min_lat, 1e-6)
+
+                    major_candidates = []
+                    for c_idx, cf in enumerate(cleaned_feats):
+                        cp = cf.get("properties", {})
+                        ct = cp.get("change_type", "")
+                        b_cls = cp.get("before_class", "")
+                        a_cls = cp.get("after_class", "")
+                        area = cp.get("area_sq_m") or 0.0
+
+                        if ct == "No Change" or (b_cls == a_cls and "Veg" in b_cls and area < 50000):
+                            continue
+                        if "Demo" in ct and ("Soil" in b_cls or "Ground" in b_cls or "Barren" in b_cls or "Land" in b_cls):
+                            continue
+
+                        f_lons, f_lats = [], []
+                        def _fl(coords):
+                            for item in coords:
+                                if isinstance(item[0], list): _fl(item)
+                                else:
+                                    f_lons.append(item[0])
+                                    f_lats.append(item[1])
+                        g = cf.get("geometry") or {}
+                        if g.get("coordinates"):
+                            _fl(g["coordinates"])
+
+                        if not f_lons:
+                            continue
+
+                        f_min_lon, f_max_lon = min(f_lons), max(f_lons)
+                        f_min_lat, f_max_lat = min(f_lats), max(f_lats)
+
+                        x = round(((f_min_lon - s_min_lon) / lon_span) * 100.0, 2)
+                        y = round(((s_max_lat - f_max_lat) / lat_span) * 100.0, 2)
+                        w = round(max(3.5, ((f_max_lon - f_min_lon) / lon_span) * 100.0), 2)
+                        h = round(max(3.5, ((f_max_lat - f_min_lat) / lat_span) * 100.0), 2)
+
+                        # Set box_pct back on the feature properties as well
+                        cp["box_pct"] = {"x": x, "y": y, "w": w, "h": h}
+
+                        t_lbl = cp.get("transition_label")
+                        if not t_lbl:
+                            if "Construct" in ct or "Built" in a_cls: t_lbl = "Vegetation → Built-up"
+                            elif "Clear" in ct or "Ground" in a_cls or "Soil" in a_cls: t_lbl = "Vegetation → Ground"
+                            elif "Road" in ct: t_lbl = "Vegetation → Road"
+                            elif "Water" in ct: t_lbl = "Land → Water (Extension)"
+                            elif "Demo" in ct: t_lbl = "Built-up → Ground"
+                            else: t_lbl = f"{b_cls} → {a_cls}"
+                            cp["transition_label"] = t_lbl
+
+                        major_candidates.append({
+                            "id": c_idx + 1,
+                            "change_type": ct,
+                            "transition_label": t_lbl,
+                            "before_class": b_cls,
+                            "after_class": a_cls,
+                            "area_m2": area,
+                            "box_pct": {"x": x, "y": y, "w": w, "h": h},
+                        })
+
+                    # Filter: keep Construction, Road, Clearance, Demolition (valid), Water, or area >= 2000 m2
+                    major_filtered = [
+                        m for m in major_candidates
+                        if any(k in m["change_type"] for k in ["Construct", "Road", "Clear", "Demo", "Water"])
+                        or m["area_m2"] >= 2000.0
+                    ]
+                    major_filtered.sort(key=lambda item: item.get("area_m2", 0), reverse=True)
+                    change_boxes = major_filtered[:25]
+
+            # Reconstruct or compute water extent stats if missing
+            water_stats = meta.get("water_extent_stats")
+            if not water_stats:
+                # Estimate from cursor_sample_grid if available
+                csg = meta.get("cursor_sample_grid") or {}
+                b_grid = csg.get("before", {}).get("class", [])
+                a_grid = csg.get("after", {}).get("class", [])
+                if b_grid and a_grid:
+                    w_before = sum(row.count("Water") for row in b_grid) * 64
+                    w_after = sum(row.count("Water") for row in a_grid) * 64
+                    delta = w_after - w_before
+                    is_ext = (delta >= 25)
+                    is_shk = (delta <= -25)
+                    water_stats = {
+                        "before_pixels": w_before,
+                        "after_pixels": w_after,
+                        "delta_pixels": delta,
+                        "new_water_pixels": max(0, delta),
+                        "is_extension_proven": is_ext,
+                        "is_shrinkage_proven": is_shk,
+                        "status": "Extended" if is_ext else ("Shrunk" if is_shk else "Stable"),
+                        "proof": f"Water Extent {'Expansion Verified' if is_ext else 'Stable'}: Δ {delta:+d} px."
+                    }
+
             pairwise.append({
                 "pair_index": idx,
                 "tile_before_id": t_b,
@@ -299,8 +452,17 @@ def get_saved_sequence_analysis(site_key: str) -> Optional[Dict[str, Any]]:
                 "changed_pixels": meta.get("changed_pixels"),
                 "rgb_before_url": meta.get("rgb_before_url"),
                 "rgb_after_url": meta.get("rgb_after_url"),
-                "ndvi_before_url": meta.get("ndvi_before_url"),
-                "ndvi_after_url": meta.get("ndvi_after_url"),
+                "rgb_before_annotated_url": meta.get("rgb_before_annotated_url"),
+                "rgb_after_annotated_url": meta.get("rgb_after_annotated_url"),
+                "ndvi_before_url": meta.get("before_ndvi_url") or meta.get("ndvi_before_url"),
+                "ndvi_after_url": meta.get("after_ndvi_url") or meta.get("ndvi_after_url"),
+                "before_ndvi_url": meta.get("before_ndvi_url") or meta.get("ndvi_before_url"),
+                "after_ndvi_url": meta.get("after_ndvi_url") or meta.get("ndvi_after_url"),
+                "ndvi_delta_url": meta.get("ndvi_delta_url"),
+                "ndvi_before_annotated_url": meta.get("ndvi_before_annotated_url"),
+                "ndvi_after_annotated_url": meta.get("ndvi_after_annotated_url"),
+                "change_boxes": change_boxes,
+                "water_extent_stats": water_stats,
                 "binary_mask_url": meta.get("binary_mask_url"),
                 "filtered_mask_url": meta.get("filtered_mask_url"),
                 "spectral_profile": meta.get("pair_spectral_profile"),

@@ -58,25 +58,46 @@ def normalize_sentinel_rgb(
 
 
 def load_tile_rgb(tile_path: str) -> np.ndarray:
-    """Loads a GeoTIFF tile and extracts (H, W, 3) uint8 RGB.
-
-    Sentinel-2 AeroLens band order:
-    B01, B02 (Blue=2), B03 (Green=3), B04 (Red=4), B05, B08 (NIR=6), B8A, B11 (SWIR=8), B12
-    """
+    """Loads a GeoTIFF tile and extracts (H, W, 3) uint8 RGB."""
     if not os.path.exists(tile_path):
         raise FileNotFoundError(f"Tile file not found: {tile_path}")
 
+    # 1. Prefer visual thumbnail if present
+    thumb_path = tile_path.replace(".tif", "_thumb.jpg")
+    if not os.path.exists(thumb_path):
+        thumb_path = tile_path.replace(".tif", "_thumb.png")
+    if os.path.exists(thumb_path):
+        try:
+            with Image.open(thumb_path) as t_img:
+                return np.array(t_img.convert("RGB"))
+        except Exception:
+            pass
+
+    # 2. Extract from GeoTIFF with description awareness
     with rasterio.open(tile_path) as ds:
-        # If standard 3-band RGB
+        desc = [str(d).strip().upper() for d in (ds.descriptions or []) if d]
+        desc_map = {d: ds.read(i) for i, d in enumerate(desc, 1)}
+
+        r = desc_map.get("B04", desc_map.get("RED", desc_map.get("B4", desc_map.get("B05"))))
+        g = desc_map.get("B03", desc_map.get("GREEN", desc_map.get("B3")))
+        b = desc_map.get("B02", desc_map.get("BLUE", desc_map.get("B2", desc_map.get("B01"))))
+
+        if r is not None and g is not None and b is not None:
+            return normalize_sentinel_rgb(r, g, b)
+
         if ds.count == 3:
             r = ds.read(1)
             g = ds.read(2)
             b = ds.read(3)
-        elif ds.count >= 4:
-            # 9-band Sentinel-2 tile
+        elif ds.count >= 9:
+            # Sentinel-2 9-band stack
             r = ds.read(4)  # B04 Red
             g = ds.read(3)  # B03 Green
             b = ds.read(2)  # B02 Blue
+        elif ds.count >= 4:
+            b = ds.read(1)
+            g = ds.read(2)
+            r = ds.read(3)
         else:
             data = ds.read(1)
             r, g, b = data, data, data

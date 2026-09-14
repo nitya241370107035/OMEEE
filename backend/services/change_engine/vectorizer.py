@@ -12,6 +12,7 @@ from affine import Affine
 
 from backend.services.change_engine.change_type_rules import (
     refine_road_morphology,
+    format_transition_label,
     TYPE_CONSTRUCTION,
     TYPE_ROAD_DEVELOPMENT,
     MAJOR_CHANGE_TYPES,
@@ -24,7 +25,7 @@ def polygonize_change_mask(
     change_type_map: Optional[np.ndarray] = None,
     before_class_map: Optional[np.ndarray] = None,
     after_class_map: Optional[np.ndarray] = None,
-    min_area_px: int = 4,
+    min_area_px: int = 15,
     simplify_tolerance: float = 1e-6,
     indices_before: Optional[Dict[str, np.ndarray]] = None,
     indices_after: Optional[Dict[str, np.ndarray]] = None,
@@ -69,15 +70,17 @@ def polygonize_change_mask(
         if area_px < min_area_px:
             continue
 
+        # Use representative_point which is guaranteed to lie inside the polygon
+        rep_pt = poly.representative_point()
+        c_col = int(np.clip((rep_pt.x - geotransform.c) / geotransform.a, 0, mask.shape[1] - 1))
+        c_row = int(np.clip((rep_pt.y - geotransform.f) / geotransform.e, 0, mask.shape[0] - 1))
+
         # Extract dominant change type and classes if maps are supplied
         change_type = TYPE_CONSTRUCTION
         before_class = "Unknown"
         after_class = "Unknown"
 
         if change_type_map is not None:
-            # Sample point or representative pixel
-            c_col = int(np.clip((poly.centroid.x - geotransform.c) / geotransform.a, 0, mask.shape[1] - 1))
-            c_row = int(np.clip((poly.centroid.y - geotransform.f) / geotransform.e, 0, mask.shape[0] - 1))
             change_type = str(change_type_map[c_row, c_col])
             if before_class_map is not None:
                 before_class = str(before_class_map[c_row, c_col])
@@ -115,8 +118,6 @@ def polygonize_change_mask(
         # Extract spectral indices for this region if maps are provided
         spectral_profile = None
         if indices_before is not None and indices_after is not None:
-            c_col = int(np.clip((poly.centroid.x - geotransform.c) / geotransform.a, 0, mask.shape[1] - 1))
-            c_row = int(np.clip((poly.centroid.y - geotransform.f) / geotransform.e, 0, mask.shape[0] - 1))
             b_ndvi = round(float(indices_before.get("ndvi", np.zeros((1, 1)))[c_row, c_col]), 3)
             b_ndbi = round(float(indices_before.get("ndbi", np.zeros((1, 1)))[c_row, c_col]), 3)
             b_ndwi = round(float(indices_before.get("ndwi", np.zeros((1, 1)))[c_row, c_col]), 3)
@@ -133,11 +134,14 @@ def polygonize_change_mask(
                 }
             }
 
+        transition_label = format_transition_label(before_class, after_class, change_type)
+
         feature = {
             "type": "Feature",
             "geometry": mapping(poly),
             "properties": {
                 "change_type": change_type,
+                "transition_label": transition_label,
                 "before_class": before_class,
                 "after_class": after_class,
                 "area_px": area_px,

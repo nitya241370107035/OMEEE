@@ -14,9 +14,11 @@ from backend.services.change_engine.spectral_classifier import (
     classify_pixels,
     CLASS_WATER,
     CLASS_DENSE_VEGETATION,
+    CLASS_SPARSE_VEGETATION,
     CLASS_MODERATE_VEGETATION,
     CLASS_BUILT_UP,
     CLASS_BARE_SOIL,
+    CLASS_CONFUSION,
     CLASS_UNCLASSIFIED,
 )
 from backend.services.change_engine.semantic_change_filter import (
@@ -36,8 +38,62 @@ from backend.services.change_engine.change_type_rules import (
 
 
 class TestSpectralClassifier:
+    def test_water_class(self):
+        """💧 Water: NDVI [-0.50, 0.20], NDWI [0.20, 1.00], NDBI [-1.00, -0.10] -> Water."""
+        ndvi = np.array([-0.20])
+        ndwi = np.array([0.45])
+        ndbi = np.array([-0.35])
+
+        result = classify_pixels(ndvi, ndwi, ndbi)
+        assert result[0] == CLASS_WATER
+
+    def test_dense_vegetation(self):
+        """🌳 Dense vegetation: NDVI [0.50, 0.90+], NDWI [-0.60, 0.10], NDBI [-0.60, -0.10] -> Dense Vegetation."""
+        ndvi = np.array([0.70])
+        ndwi = np.array([-0.20])
+        ndbi = np.array([-0.30])
+
+        result = classify_pixels(ndvi, ndwi, ndbi)
+        assert result[0] == CLASS_DENSE_VEGETATION
+
+    def test_sparse_vegetation(self):
+        """🌱 Sparse vegetation: NDVI [0.20, <0.50), NDWI [-0.50, 0.10], NDBI [-0.40, 0.10] -> Sparse Vegetation."""
+        ndvi = np.array([0.35])
+        ndwi = np.array([-0.10])
+        ndbi = np.array([-0.05])
+
+        result = classify_pixels(ndvi, ndwi, ndbi)
+        assert result[0] == CLASS_SPARSE_VEGETATION
+
+    def test_built_up_strong_evidence(self):
+        """🏢 Built-up: NDVI [-0.10, 0.30], NDWI [-0.50, 0.10], NDBI >= 0.15 to 0.50 -> Built-up."""
+        ndvi = np.array([0.10])
+        ndwi = np.array([-0.15])
+        ndbi = np.array([0.25])
+
+        result = classify_pixels(ndvi, ndwi, ndbi)
+        assert result[0] == CLASS_BUILT_UP
+
+    def test_bare_soil_open_land(self):
+        """🟤 Bare soil / open land: NDVI [-0.20, <0.20), NDWI [-0.50, 0.10], NDBI [-0.20, <0.00) -> Bare Soil / Open Land."""
+        ndvi = np.array([0.05])
+        ndwi = np.array([-0.10])
+        ndbi = np.array([-0.10])
+
+        result = classify_pixels(ndvi, ndwi, ndbi)
+        assert result[0] == CLASS_BARE_SOIL
+
+    def test_built_up_bare_land_confusion(self):
+        """⚠️ Built-up / Bare-land confusion: NDVI [-0.10, 0.20], NDWI [-0.50, 0.10], NDBI [0.00, <0.15) -> Confusion."""
+        ndvi = np.array([-0.05])
+        ndwi = np.array([-0.05])
+        ndbi = np.array([0.08])
+
+        result = classify_pixels(ndvi, ndwi, ndbi)
+        assert result[0] == CLASS_CONFUSION
+
     def test_user_worked_example_before(self):
-        """User worked example: Before pixel NDVI 0.917, NDBI -0.898, NDWI -0.8 -> Dense Vegetation."""
+        """High canopy vegetation (NDVI 0.917, NDBI -0.898, NDWI -0.8) -> Dense Vegetation."""
         ndvi = np.array([0.917])
         ndbi = np.array([-0.898])
         ndwi = np.array([-0.8])
@@ -46,31 +102,13 @@ class TestSpectralClassifier:
         assert result[0] == CLASS_DENSE_VEGETATION
 
     def test_user_worked_example_after(self):
-        """User worked example: After pixel NDVI -0.091, NDBI 0.115, NDWI -0.035 -> Built-up / Urban."""
+        """After pixel with strong NDBI >= 0.15 -> Built-up."""
         ndvi = np.array([-0.091])
-        ndbi = np.array([0.115])
+        ndbi = np.array([0.25])
         ndwi = np.array([-0.035])
 
         result = classify_pixels(ndvi, ndwi, ndbi)
         assert result[0] == CLASS_BUILT_UP
-
-    def test_water_priority(self):
-        """NDWI > 0.3 and NDBI < -0.1 confirms water over built-up."""
-        ndvi = np.array([-0.2])
-        ndwi = np.array([0.45])
-        ndbi = np.array([-0.35])
-
-        result = classify_pixels(ndvi, ndwi, ndbi)
-        assert result[0] == CLASS_WATER
-
-    def test_bare_soil(self):
-        """NDVI <= 0.1, NDBI <= 0, NDWI <= 0 -> Bare Soil / Barren."""
-        ndvi = np.array([0.05])
-        ndwi = np.array([-0.1])
-        ndbi = np.array([-0.05])
-
-        result = classify_pixels(ndvi, ndwi, ndbi)
-        assert result[0] == CLASS_BARE_SOIL
 
     def test_compute_indices_formulas(self):
         """Checks mathematical ratio bounds."""
@@ -104,31 +142,35 @@ class TestSemanticFilter:
         assert stats["verified_changes"] == 1
 
     def test_unchanged_surface_and_phenology_removed_from_verified_mask(self):
-        """Unchanged surface (before == after, intra-veg phenology, both unclassified) must be strictly discarded."""
+        """Unchanged surface (before == after, intra-veg phenology, confusion noise) must be strictly discarded."""
         before = np.array([
             CLASS_BUILT_UP,            # unchanged
             CLASS_DENSE_VEGETATION,    # intra-veg phenology
             CLASS_UNCLASSIFIED,        # both unclassified
-            CLASS_BARE_SOIL,           # real change
+            CLASS_BARE_SOIL,           # ambiguous confusion transition (discarded)
+            CLASS_SPARSE_VEGETATION,   # real change (kept)
         ])
         after = np.array([
             CLASS_BUILT_UP,
-            CLASS_MODERATE_VEGETATION,
+            CLASS_SPARSE_VEGETATION,
             CLASS_UNCLASSIFIED,
+            CLASS_CONFUSION,
             CLASS_BUILT_UP,
         ])
-        binary_mask = np.ones(4, dtype=np.uint8)
+        binary_mask = np.ones(5, dtype=np.uint8)
 
         surviving, stats = filter_semantic_changes(before, after, binary_mask)
         # Built-up -> Built-up: rejected
         assert surviving[0] == False
-        # Dense Veg -> Moderate Veg: rejected as seasonal phenology
+        # Dense Veg -> Sparse Veg: rejected as seasonal phenology
         assert surviving[1] == False
         # Unclassified -> Unclassified: rejected as unchanged
         assert surviving[2] == False
-        # Bare Soil -> Built-up: kept as real Construction
-        assert surviving[3] == True
-        assert stats["false_positives_rejected"] == 3
+        # Bare Soil -> Confusion: rejected as unconfirmed / ambiguous
+        assert surviving[3] == False
+        # Sparse Veg -> Built-up: kept as real Construction
+        assert surviving[4] == True
+        assert stats["false_positives_rejected"] == 4
         assert stats["verified_changes"] == 1
 
 
@@ -137,6 +179,8 @@ class TestChangeTypeRules:
         """Validates all key transition matrix pairings (§2.5)."""
         # Dense Veg -> Built-up
         assert lookup_change_type(CLASS_DENSE_VEGETATION, CLASS_BUILT_UP) == TYPE_CONSTRUCTION
+        # Sparse Veg -> Built-up
+        assert lookup_change_type(CLASS_SPARSE_VEGETATION, CLASS_BUILT_UP) == TYPE_CONSTRUCTION
         # Bare Soil -> Built-up
         assert lookup_change_type(CLASS_BARE_SOIL, CLASS_BUILT_UP) == TYPE_CONSTRUCTION
         # Dense Veg -> Bare Soil
@@ -145,8 +189,14 @@ class TestChangeTypeRules:
         assert lookup_change_type(CLASS_WATER, CLASS_BARE_SOIL) == TYPE_WATER_SHRINKAGE
         # Bare Soil -> Water (expansion)
         assert lookup_change_type(CLASS_BARE_SOIL, CLASS_WATER) == TYPE_WATER_EXPANSION
-        # Built-up -> Moderate Veg (demolition / reversion)
-        assert lookup_change_type(CLASS_BUILT_UP, CLASS_MODERATE_VEGETATION) == TYPE_DEMOLITION
+        # Built-up -> Bare Soil (demolition / excavation)
+        assert lookup_change_type(CLASS_BUILT_UP, CLASS_BARE_SOIL) == TYPE_DEMOLITION
+        # Built-up -> Sparse Veg (revegetation / greening is suppressed from structural demolition)
+        assert lookup_change_type(CLASS_BUILT_UP, CLASS_SPARSE_VEGETATION) == "No Change"
+        # Bare Soil -> Confusion (suppressed as unconfirmed)
+        assert lookup_change_type(CLASS_BARE_SOIL, CLASS_CONFUSION) == "No Change"
+        # Confusion -> Built-up (suppressed as unconfirmed)
+        assert lookup_change_type(CLASS_CONFUSION, CLASS_BUILT_UP) == "No Change"
 
     def test_road_morphology_elongation_subrule(self):
         """Elongated polygon (ratio > 4) reclassified from Construction to Road Development."""
