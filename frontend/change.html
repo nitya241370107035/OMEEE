@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AeroLens — Multi-Temporal Change Detection Studio</title>
+  <title>AeroLens â€” Multi-Temporal Change Detection Studio</title>
   
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
@@ -14,548 +14,372 @@
 
   <style>
     /* ============================================================
-       CHANGE DETECTION STUDIO LAYOUT & HUD OVERLAYS
+       CHANGE DETECTION STUDIO â€” CLEAN OVERHAUL v14
        ============================================================ */
+
+    /* â”€â”€ Base Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     body {
-      margin: 0;
-      padding: 0;
-      height: 100vh;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
+      margin: 0; padding: 0;
+      height: 100vh; overflow: hidden;
+      display: flex; flex-direction: column;
       background: var(--bg-primary, #070a12);
       font-family: 'Inter', -apple-system, sans-serif;
     }
 
     .nav-item.active {
-      background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(99, 102, 241, 0.25));
+      background: linear-gradient(135deg, rgba(6,182,212,0.25), rgba(99,102,241,0.25));
       border-color: var(--border-active, #06b6d4);
       color: #38bdf8;
     }
 
     #studio-main {
       position: relative;
-      flex: 1;
-      width: 100%;
+      flex: 1; width: 100%;
       height: calc(100vh - 65px);
       overflow: hidden;
     }
 
     #change-map {
-      width: 100%;
-      height: 100%;
+      width: 100%; height: 100%;
       background: #0b1120;
     }
 
-    /* Floating Aerospace HUD Header Overlay */
+    /* â”€â”€ Floating HUD Top â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .studio-hud-top {
       position: absolute;
-      top: 16px;
-      left: 65px;
-      right: 20px;
+      top: 16px; left: 65px; right: 20px;
       z-index: 1000;
-      display: flex;
-      align-items: center;
+      display: flex; align-items: center;
       justify-content: space-between;
-      pointer-events: none;
-      gap: 12px;
+      pointer-events: none; gap: 12px;
     }
 
     .hud-card {
       pointer-events: auto;
-      background: rgba(13, 18, 31, 0.88);
+      background: rgba(13,18,31,0.88);
       backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.55);
       border-radius: 12px;
       padding: 10px 18px;
-      display: flex;
-      align-items: center;
-      gap: 16px;
+      display: flex; align-items: center; gap: 16px;
     }
 
-    .hud-title-cluster {
-      display: flex;
-      flex-direction: column;
-    }
+    .hud-title-cluster { display: flex; flex-direction: column; }
 
     .hud-title {
-      font-size: 13px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
+      font-size: 13px; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase;
       color: #38bdf8;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      display: flex; align-items: center; gap: 6px;
     }
 
-    .hud-subtitle {
-      font-size: 11px;
-      color: #94a3b8;
-      margin-top: 2px;
-    }
+    .hud-subtitle { font-size: 11px; color: #94a3b8; margin-top: 2px; }
 
     .hud-metrics-bar {
-      display: flex;
-      align-items: center;
-      gap: 18px;
+      display: flex; align-items: center; gap: 18px;
       padding-left: 14px;
-      border-left: 1px solid rgba(255, 255, 255, 0.1);
+      border-left: 1px solid rgba(255,255,255,0.1);
     }
 
-    .hud-stat-item {
-      display: flex;
-      flex-direction: column;
-    }
+    .hud-stat-item { display: flex; flex-direction: column; }
 
     .hud-stat-num {
-      font-size: 16px;
-      font-weight: 800;
+      font-size: 16px; font-weight: 800;
       font-family: 'JetBrains Mono', monospace;
-      color: #f8fafc;
-      line-height: 1.1;
+      color: #f8fafc; line-height: 1.1;
     }
 
-    .hud-stat-num.cyan {
-      color: #06b6d4;
-      text-shadow: 0 0 12px rgba(6, 182, 212, 0.5);
-    }
+    .hud-stat-num.cyan { color: #06b6d4; text-shadow: 0 0 12px rgba(6,182,212,0.5); }
 
     .hud-stat-label {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: #64748b;
-      margin-top: 2px;
+      font-size: 10px; text-transform: uppercase;
+      letter-spacing: 0.05em; color: #64748b; margin-top: 2px;
     }
 
     .hud-controls-cluster {
       pointer-events: auto;
-      display: flex;
-      align-items: center;
-      gap: 10px;
+      display: flex; align-items: center; gap: 10px;
     }
 
     .hud-btn {
-      background: rgba(19, 27, 46, 0.85);
+      background: rgba(19,27,46,0.85);
       backdrop-filter: blur(8px);
-      border: 1px solid rgba(255, 255, 255, 0.14);
-      color: #e2e8f0;
-      border-radius: 8px;
-      padding: 8px 14px;
-      font-size: 12px;
-      font-weight: 600;
+      border: 1px solid rgba(255,255,255,0.14);
+      color: #e2e8f0; border-radius: 8px;
+      padding: 8px 14px; font-size: 12px; font-weight: 600;
       cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
+      display: inline-flex; align-items: center; gap: 6px;
       transition: all 0.2s ease;
     }
 
     .hud-btn:hover {
-      background: rgba(30, 41, 69, 0.95);
-      border-color: #38bdf8;
-      color: #38bdf8;
-      box-shadow: 0 0 16px rgba(6, 182, 212, 0.35);
+      background: rgba(30,41,69,0.95);
+      border-color: #38bdf8; color: #38bdf8;
+      box-shadow: 0 0 16px rgba(6,182,212,0.35);
       transform: translateY(-1px);
     }
 
-    /* Selected Site Pill in HUD */
     #hud-selected-container {
-      display: none;
-      align-items: center;
-      gap: 8px;
-      background: rgba(245, 158, 11, 0.15);
-      border: 1px solid rgba(245, 158, 11, 0.4);
-      padding: 6px 12px;
-      border-radius: 8px;
+      display: none; align-items: center; gap: 8px;
+      background: rgba(245,158,11,0.15);
+      border: 1px solid rgba(245,158,11,0.4);
+      padding: 6px 12px; border-radius: 8px;
     }
 
     #hud-selected-site {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      font-weight: 600;
-      color: #fbbf24;
+      font-size: 11px; font-weight: 600; color: #fbbf24;
     }
 
-    /* Floating Legend Overlay (Bottom Left) */
+    /* â”€â”€ Floating Legend (Bottom Left) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .studio-legend {
-      position: absolute;
-      bottom: 20px;
-      left: 20px;
-      z-index: 1000;
-      background: rgba(13, 18, 31, 0.9);
+      position: absolute; bottom: 20px; left: 20px; z-index: 1000;
+      background: rgba(13,18,31,0.9);
       backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-      border-radius: 10px;
-      padding: 12px 16px;
-      font-size: 11px;
-      color: #cbd5e1;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+      border-radius: 10px; padding: 12px 16px;
+      font-size: 11px; color: #cbd5e1;
+      display: flex; flex-direction: column; gap: 8px;
       pointer-events: auto;
     }
 
     .legend-title {
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
+      font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.06em;
       color: #94a3b8;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
       padding-bottom: 4px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      display: flex; align-items: center; gap: 6px;
     }
 
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
+    .legend-item { display: flex; align-items: center; gap: 10px; }
 
-    .legend-box {
-      width: 16px;
-      height: 16px;
-      border-radius: 3px;
-    }
+    .legend-box { width: 16px; height: 16px; border-radius: 3px; }
 
     .legend-box.multi {
-      background: rgba(6, 182, 212, 0.25);
+      background: rgba(6,182,212,0.25);
       border: 2px solid #06b6d4;
-      box-shadow: 0 0 8px rgba(6, 182, 212, 0.6);
+      box-shadow: 0 0 8px rgba(6,182,212,0.6);
     }
 
     .legend-box.single {
-      background: rgba(51, 65, 85, 0.2);
+      background: rgba(51,65,85,0.2);
       border: 1.5px dashed #64748b;
     }
 
-    /* ============================================================
-       MULTI-TEMPORAL TIME-SERIES FULLSCREEN WORKBENCH
-       ============================================================ */
+    /* â”€â”€ Full-Screen Temporal Drawer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     #temporal-drawer {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      width: 100%;
-      height: 100%;
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
       z-index: 1250;
-      background: rgba(8, 12, 22, 0.98);
+      background: rgba(7, 10, 20, 0.98);
       backdrop-filter: blur(28px);
-      -webkit-backdrop-filter: blur(28px);
-      border: none;
-      box-shadow: none;
-      display: flex;
-      flex-direction: column;
-      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+      display: flex; flex-direction: column;
+      transition: transform 0.35s cubic-bezier(0.16,1,0.3,1), opacity 0.25s ease;
       transform: translateX(100%);
-      opacity: 0;
-      pointer-events: none;
+      opacity: 0; pointer-events: none;
       overflow: hidden;
     }
 
     #temporal-drawer.open {
       transform: translateX(0);
-      opacity: 1;
-      pointer-events: auto;
+      opacity: 1; pointer-events: auto;
+    }
+
+    /* â”€â”€ Drawer Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    .drawer-header {
+      padding: 14px 24px;
+      border-bottom: 1px solid rgba(255,255,255,0.09);
+      display: flex; align-items: center;
+      justify-content: space-between;
+      background: rgba(12,17,30,0.85);
+      flex-shrink: 0;
+    }
+
+    .drawer-header-left {
+      display: flex; flex-direction: column; gap: 4px;
+    }
+
+    .drawer-badge {
+      align-self: flex-start;
+      font-size: 9px; font-weight: 800;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      background: linear-gradient(135deg, rgba(6,182,212,0.22), rgba(99,102,241,0.22));
+      color: #38bdf8;
+      border: 1px solid rgba(6,182,212,0.5);
+      padding: 3px 8px; border-radius: 4px;
+    }
+
+    .drawer-title {
+      font-size: 15px; font-weight: 700;
+      color: #f8fafc; letter-spacing: -0.01em; margin-top: 3px;
+    }
+
+    .drawer-site-key {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px; color: #64748b;
     }
 
     .drawer-back-btn {
-      background: rgba(6, 182, 212, 0.15);
-      border: 1px solid rgba(6, 182, 212, 0.4);
-      color: #38bdf8;
-      border-radius: 8px;
-      padding: 6px 14px;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 12px;
-      font-weight: 700;
+      background: rgba(6,182,212,0.12);
+      border: 1px solid rgba(6,182,212,0.35);
+      color: #38bdf8; border-radius: 8px;
+      padding: 6px 14px; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 12px; font-weight: 700;
       letter-spacing: 0.04em;
       transition: all 0.2s;
     }
 
     .drawer-back-btn:hover {
-      background: rgba(6, 182, 212, 0.3);
+      background: rgba(6,182,212,0.25);
       border-color: #38bdf8;
-      box-shadow: 0 0 16px rgba(6, 182, 212, 0.4);
-      transform: translateX(-2px);
-    }
-
-    .drawer-header {
-      padding: 18px 24px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      background: rgba(19, 27, 46, 0.7);
-    }
-
-    .drawer-header-left {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .drawer-badge {
-      align-self: flex-start;
-      font-size: 10px;
-      font-weight: 800;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(99, 102, 241, 0.25));
-      color: #38bdf8;
-      border: 1px solid rgba(6, 182, 212, 0.5);
-      padding: 3px 8px;
-      border-radius: 4px;
-    }
-
-    .drawer-title {
-      font-size: 16px;
-      font-weight: 700;
-      color: #f8fafc;
-      letter-spacing: -0.01em;
-      margin-top: 4px;
-    }
-
-    .drawer-site-key {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      color: #94a3b8;
-      word-break: break-all;
+      box-shadow: 0 0 16px rgba(6,182,212,0.35);
     }
 
     .drawer-close-btn {
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      color: #94a3b8;
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      transition: all 0.2s;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #64748b; width: 32px; height: 32px;
+      border-radius: 8px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; transition: all 0.2s;
     }
 
     .drawer-close-btn:hover {
-      background: rgba(244, 63, 94, 0.2);
-      border-color: #f43f5e;
-      color: #f43f5e;
+      background: rgba(244,63,94,0.18);
+      border-color: #f43f5e; color: #f43f5e;
     }
 
+    /* â”€â”€ Drawer Body â€” Full Width Single Column â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .drawer-body {
-      flex: 1;
-      overflow-y: auto;
-      padding: 16px 24px 28px 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
+      flex: 1; overflow-y: auto;
+      padding: 20px 28px 32px;
+      display: flex; flex-direction: column; gap: 20px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(6,182,212,0.3) transparent;
     }
 
+    .drawer-body::-webkit-scrollbar { width: 6px; }
+    .drawer-body::-webkit-scrollbar-thumb {
+      background: rgba(6,182,212,0.3); border-radius: 3px;
+    }
+
+    /* Main content is now full width â€” no 2-column grid */
     .drawer-workbench-grid {
-      display: grid;
-      grid-template-columns: 460px minmax(620px, 1fr);
-      gap: 20px;
-      align-items: flex-start;
+      display: flex; flex-direction: column; gap: 20px;
       width: 100%;
     }
 
-    .drawer-left-col, .drawer-right-col {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      min-width: 0;
-    }
-
-    .results-split-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 14px;
-      align-items: stretch;
-    }
-
-    @media (max-width: 1350px) {
-      .drawer-workbench-grid {
-        grid-template-columns: 420px 1fr;
-        gap: 16px;
-      }
-    }
-
-    @media (max-width: 1120px) {
-      .results-split-row {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    @media (max-width: 1080px) {
-      .drawer-workbench-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
+    /* â”€â”€ Drawer Section Cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .drawer-section {
-      background: rgba(19, 27, 46, 0.55);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 12px;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+      background: rgba(15,22,40,0.7);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      padding: 18px 20px;
+      display: flex; flex-direction: column; gap: 14px;
     }
 
     .drawer-section-title {
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
+      font-size: 12px; font-weight: 700;
+      letter-spacing: 0.06em; text-transform: uppercase;
       color: #38bdf8;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      display: flex; align-items: center; gap: 6px;
     }
 
     .drawer-section-desc {
-      font-size: 11px;
-      color: #94a3b8;
-      line-height: 1.4;
+      font-size: 11px; color: #64748b; line-height: 1.5;
     }
 
-    /* 1. Multi-Temporal Filmstrip Stack */
+    /* â”€â”€ Filmstrip Stack â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .temporal-stack-scroll {
-      display: flex;
-      gap: 12px;
-      overflow-x: auto;
-      padding-bottom: 8px;
+      display: flex; gap: 12px;
+      overflow-x: auto; padding-bottom: 8px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(6,182,212,0.25) transparent;
     }
 
-    .temporal-stack-scroll::-webkit-scrollbar {
-      height: 6px;
-    }
+    .temporal-stack-scroll::-webkit-scrollbar { height: 4px; }
     .temporal-stack-scroll::-webkit-scrollbar-thumb {
-      background: rgba(6, 182, 212, 0.3);
-      border-radius: 3px;
+      background: rgba(6,182,212,0.3); border-radius: 2px;
     }
 
     .stack-epoch-card {
-      flex: 0 0 160px;
-      background: rgba(13, 18, 31, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 10px;
-      padding: 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      transition: all 0.2s;
+      flex: 0 0 150px;
+      background: rgba(13,18,31,0.85);
+      border: 1px solid rgba(255,255,255,0.09);
+      border-radius: 10px; padding: 10px;
+      display: flex; flex-direction: column; gap: 8px;
+      transition: all 0.2s; cursor: pointer;
     }
 
     .stack-epoch-card:hover {
       border-color: #38bdf8;
-      transform: translateY(-2px);
-      box-shadow: 0 4px 16px rgba(6, 182, 212, 0.25);
+      transform: translateY(-3px);
+      box-shadow: 0 6px 20px rgba(6,182,212,0.2);
     }
 
     .stack-epoch-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      display: flex; align-items: center; justify-content: space-between;
     }
 
     .stack-epoch-tag {
-      font-size: 10px;
-      font-weight: 800;
+      font-size: 9px; font-weight: 800;
       font-family: 'JetBrains Mono', monospace;
       color: #06b6d4;
-      background: rgba(6, 182, 212, 0.15);
-      border: 1px solid rgba(6, 182, 212, 0.3);
-      padding: 1px 6px;
-      border-radius: 4px;
+      background: rgba(6,182,212,0.14);
+      border: 1px solid rgba(6,182,212,0.3);
+      padding: 1px 5px; border-radius: 3px;
     }
 
-    .stack-epoch-elapsed {
-      font-size: 9px;
-      color: #94a3b8;
-      font-family: 'JetBrains Mono', monospace;
-    }
+    .stack-epoch-elapsed { font-size: 9px; color: #64748b; font-family: 'JetBrains Mono', monospace; }
 
     .stack-thumb-box {
-      width: 100%;
-      aspect-ratio: 1;
-      border-radius: 6px;
-      overflow: hidden;
+      width: 100%; aspect-ratio: 1;
+      border-radius: 6px; overflow: hidden;
       background: #070a12;
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255,255,255,0.07);
     }
 
     .stack-thumb-img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
+      width: 100%; height: 100%;
+      object-fit: cover; display: block;
     }
 
-    .stack-meta-grid {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      font-size: 10px;
-    }
+    .stack-meta-grid { display: flex; flex-direction: column; gap: 3px; font-size: 9px; }
 
     .stack-meta-item {
-      display: flex;
-      justify-content: space-between;
-      color: #94a3b8;
+      display: flex; justify-content: space-between; color: #64748b;
     }
 
-    .stack-meta-item b {
-      color: #f1f5f9;
-      font-family: 'JetBrains Mono', monospace;
-    }
+    .stack-meta-item b { color: #f1f5f9; font-family: 'JetBrains Mono', monospace; }
 
-    /* 2. Step-Wise Sequential Transitions */
-    .transitions-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
+    /* â”€â”€ Sequential Transitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    .transitions-list { display: flex; flex-direction: column; gap: 8px; }
 
     .transition-row {
-      background: rgba(13, 18, 31, 0.75);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 10px 14px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
+      background: rgba(12,17,30,0.8);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 8px; padding: 10px 14px;
+      display: flex; align-items: center;
+      justify-content: space-between; gap: 12px;
       transition: all 0.2s;
     }
 
     .transition-row:hover {
-      border-color: rgba(6, 182, 212, 0.4);
-      background: rgba(19, 27, 46, 0.9);
+      border-color: rgba(6,182,212,0.35);
+      background: rgba(18,26,46,0.9);
     }
 
     .transition-label-badge {
-      font-size: 11px;
-      font-weight: 800;
+      font-size: 11px; font-weight: 800;
       font-family: 'JetBrains Mono', monospace;
       color: #38bdf8;
-      background: rgba(6, 182, 212, 0.15);
-      padding: 3px 8px;
-      border-radius: 5px;
-      border: 1px solid rgba(6, 182, 212, 0.3);
+      background: rgba(6,182,212,0.13);
+      padding: 3px 8px; border-radius: 5px;
+      border: 1px solid rgba(6,182,212,0.3);
       white-space: nowrap;
     }
 
@@ -566,58 +390,26 @@
     }
 
     .transition-metrics-cluster {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 11px;
+      display: flex; align-items: center; gap: 12px; font-size: 11px;
     }
 
     .metric-pill {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 10px;
-      padding: 2px 6px;
+      font-size: 10px; padding: 2px 6px;
       border-radius: 4px;
-      background: rgba(255, 255, 255, 0.06);
+      background: rgba(255,255,255,0.06);
     }
 
-    /* 3. Sub-Interval Dual Inspector */
+    /* â”€â”€ Subinterval Dual Inspector â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .subinterval-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      max-width: 100%;
-    }
-
-    .subinterval-grid .stack-thumb-box {
-      width: 100%;
-      aspect-ratio: 1;
-      max-height: 220px;
-      margin: 0 auto;
-      background: #030712;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 6px;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .subinterval-grid .stack-thumb-img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      background: #030712;
-      display: block;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
     }
 
     .inspector-card {
-      background: rgba(13, 18, 31, 0.75);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 10px;
-      padding: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
+      background: rgba(12,17,30,0.8);
+      border: 1px solid rgba(255,255,255,0.09);
+      border-radius: 10px; padding: 12px;
+      display: flex; flex-direction: column; gap: 8px;
     }
 
     .inspector-card.card-t1 { border-top: 3px solid #3b82f6; }
@@ -625,74 +417,20 @@
 
     .card-date-select {
       width: 100%;
-      background: rgba(30, 41, 69, 0.9);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      color: #f8fafc;
-      font-size: 11px;
+      background: rgba(25,35,60,0.9);
+      border: 1px solid rgba(255,255,255,0.14);
+      color: #f8fafc; font-size: 11px;
       font-family: 'JetBrains Mono', monospace;
-      padding: 6px 8px;
-      border-radius: 6px;
-      cursor: pointer;
-      outline: none;
+      padding: 6px 8px; border-radius: 6px;
+      cursor: pointer; outline: none;
     }
 
-    /* 4. Multi-Temporal Asset Bridge */
-    .part2-bridge-box {
-      background: linear-gradient(135deg, rgba(6, 182, 212, 0.12), rgba(16, 185, 129, 0.12));
-      border: 1px solid rgba(6, 182, 212, 0.35);
-      border-radius: 12px;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .part2-bridge-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 12px;
-      font-weight: 700;
-      color: #10b981;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-    }
-
-    .pulse-dot {
-      width: 8px;
-      height: 8px;
-      background: #10b981;
-      border-radius: 50%;
-      box-shadow: 0 0 10px #10b981;
-      animation: pulse 1.8s infinite;
-    }
-
-    @keyframes pulse {
-      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-      70% { transform: scale(1.1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
-      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-    }
-
-    .payload-preview-code {
-      background: rgba(0, 0, 0, 0.45);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 6px;
-      padding: 8px 10px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 10px;
-      color: #a7f3d0;
-      white-space: pre-wrap;
-      word-break: break-all;
-      max-height: 120px;
-      overflow-y: auto;
-    }
-
-    /* Custom Leaflet Tooltip */
+    /* â”€â”€ Leaflet Tooltip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .leaflet-custom-tooltip {
-      background: rgba(13, 18, 31, 0.95) !important;
+      background: rgba(13,18,31,0.95) !important;
       backdrop-filter: blur(10px) !important;
-      border: 1px solid rgba(6, 182, 212, 0.4) !important;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7) !important;
+      border: 1px solid rgba(6,182,212,0.4) !important;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.7) !important;
       border-radius: 10px !important;
       padding: 10px 14px !important;
       color: #f8fafc !important;
@@ -700,1628 +438,1129 @@
     }
 
     .leaflet-custom-tooltip::before {
-      border-top-color: rgba(6, 182, 212, 0.4) !important;
+      border-top-color: rgba(6,182,212,0.4) !important;
     }
 
-    .change-grid-tooltip {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      min-width: 220px;
-    }
+    .change-grid-tooltip { display: flex; flex-direction: column; gap: 4px; min-width: 220px; }
 
     .tooltip-badge {
-      display: inline-block;
-      align-self: flex-start;
-      font-size: 9px;
-      font-weight: 800;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      padding: 2px 8px;
-      border-radius: 4px;
-      margin-bottom: 2px;
+      display: inline-block; align-self: flex-start;
+      font-size: 9px; font-weight: 800; letter-spacing: 0.06em;
+      text-transform: uppercase; padding: 2px 8px; border-radius: 4px; margin-bottom: 2px;
     }
 
     .tooltip-badge.badge-multi {
-      background: rgba(6, 182, 212, 0.25);
-      color: #38bdf8;
-      border: 1px solid rgba(6, 182, 212, 0.5);
+      background: rgba(6,182,212,0.22); color: #38bdf8;
+      border: 1px solid rgba(6,182,212,0.5);
     }
 
     .tooltip-badge.badge-single {
-      background: rgba(100, 116, 139, 0.2);
-      color: #94a3b8;
-      border: 1px solid rgba(100, 116, 139, 0.4);
+      background: rgba(100,116,139,0.18); color: #94a3b8;
+      border: 1px solid rgba(100,116,139,0.35);
     }
 
     .tooltip-title {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      font-weight: 700;
-      color: #e2e8f0;
+      font-size: 11px; font-weight: 700; color: #e2e8f0;
       word-break: break-all;
     }
 
     .tooltip-row {
-      font-size: 11px;
-      color: #94a3b8;
-      display: flex;
-      justify-content: space-between;
-      gap: 8px;
+      font-size: 11px; color: #94a3b8;
+      display: flex; justify-content: space-between; gap: 8px;
     }
 
-    .tooltip-row b {
-      color: #f1f5f9;
-    }
+    .tooltip-row b { color: #f1f5f9; }
 
     .tooltip-action {
-      margin-top: 4px;
-      padding-top: 4px;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-      font-size: 10px;
-      font-weight: 600;
-      color: #38bdf8;
+      margin-top: 4px; padding-top: 4px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      font-size: 10px; font-weight: 600; color: #38bdf8;
     }
 
-    /* ============================================================
-       PHASE 5: MULTI-TEMPORAL CHANGE ENGINE & VECTOR MAP STYLING
-       ============================================================ */
+    /* â”€â”€ Change Engine Panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .change-engine-panel {
-      background: linear-gradient(135deg, rgba(13, 18, 31, 0.92), rgba(15, 23, 42, 0.88));
-      border: 1px solid rgba(6, 182, 212, 0.3);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-      border-radius: 12px;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+      background: rgba(12,17,30,0.6);
+      border: 1px solid rgba(6,182,212,0.2);
+      border-radius: 12px; padding: 18px;
+      display: flex; flex-direction: column; gap: 14px;
     }
 
     .engine-action-bar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
+      display: flex; align-items: center;
+      justify-content: space-between; gap: 12px; flex-wrap: wrap;
     }
 
     .hud-btn.primary {
       background: linear-gradient(135deg, #0284c7, #06b6d4);
-      color: #ffffff;
-      border: 1px solid rgba(255, 255, 255, 0.25);
-      box-shadow: 0 0 16px rgba(6, 182, 212, 0.4);
-      transition: all 0.25s;
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.22);
+      box-shadow: 0 0 18px rgba(6,182,212,0.4);
     }
 
     .hud-btn.primary:hover {
       background: linear-gradient(135deg, #0369a1, #0891b2);
-      box-shadow: 0 0 24px rgba(6, 182, 212, 0.65);
+      box-shadow: 0 0 28px rgba(6,182,212,0.65);
       transform: translateY(-1px);
     }
 
     .hud-btn.primary:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-      transform: none;
-      box-shadow: none;
+      opacity: 0.55; cursor: not-allowed;
+      transform: none; box-shadow: none;
     }
 
     .toggle-container {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      cursor: pointer;
-      font-size: 11px;
-      color: #94a3b8;
+      display: flex; align-items: center; gap: 6px;
+      cursor: pointer; font-size: 11px; color: #94a3b8;
       user-select: none;
     }
 
+    /* â”€â”€ Analysis Stats Grid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .analysis-stats-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 8px;
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+    }
+
+    @media (max-width: 1200px) {
+      .analysis-stats-grid { grid-template-columns: repeat(2, 1fr); }
     }
 
     .analysis-stat-card {
-      background: rgba(13, 18, 31, 0.8);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 10px 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
+      background: rgba(12,18,33,0.85);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px; padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 3px;
     }
 
     .analysis-stat-card .stat-value {
-      font-size: 16px;
-      font-weight: 800;
+      font-size: 18px; font-weight: 800;
       font-family: 'JetBrains Mono', monospace;
-      color: #f8fafc;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      color: #f8fafc; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
     }
 
-    .analysis-stat-card .stat-value.cyan { color: #06b6d4; text-shadow: 0 0 10px rgba(6, 182, 212, 0.4); }
-    .analysis-stat-card .stat-value.gold { color: #f59e0b; text-shadow: 0 0 10px rgba(245, 158, 11, 0.4); }
+    .analysis-stat-card .stat-value.cyan { color: #06b6d4; text-shadow: 0 0 10px rgba(6,182,212,0.4); }
+    .analysis-stat-card .stat-value.gold { color: #f59e0b; text-shadow: 0 0 10px rgba(245,158,11,0.4); }
     .analysis-stat-card .stat-value.green { color: #10b981; }
 
     .analysis-stat-card .stat-label {
-      font-size: 9px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: #64748b;
+      font-size: 9px; text-transform: uppercase;
+      letter-spacing: 0.05em; color: #64748b;
     }
 
+    /* â”€â”€ View Mode Tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .view-mode-tabs {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      background: rgba(13, 18, 31, 0.6);
-      padding: 6px 10px;
-      border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex; align-items: center;
+      justify-content: space-between; gap: 10px;
+      background: rgba(12,18,33,0.6);
+      padding: 6px 10px; border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.06);
     }
 
     .mode-tab {
       background: transparent;
       border: 1px solid transparent;
-      color: #94a3b8;
-      font-size: 11px;
-      font-weight: 700;
-      padding: 5px 10px;
-      border-radius: 6px;
-      cursor: pointer;
+      color: #94a3b8; font-size: 11px; font-weight: 700;
+      padding: 5px 10px; border-radius: 6px; cursor: pointer;
       transition: all 0.2s;
     }
 
     .mode-tab.active {
-      background: rgba(6, 182, 212, 0.15);
-      border-color: rgba(6, 182, 212, 0.4);
-      color: #38bdf8;
+      background: rgba(6,182,212,0.14);
+      border-color: rgba(6,182,212,0.38); color: #38bdf8;
     }
 
+    /* â”€â”€ Breakdown & Regions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .breakdown-card {
-      background: rgba(13, 18, 31, 0.7);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 10px 12px;
+      background: rgba(12,18,33,0.7);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px; padding: 14px 16px;
     }
 
     .stacked-bar-container {
-      height: 10px;
-      width: 100%;
-      background: rgba(255, 255, 255, 0.06);
-      border-radius: 5px;
-      overflow: hidden;
-      display: flex;
-      margin-bottom: 8px;
+      height: 10px; width: 100%;
+      background: rgba(255,255,255,0.06);
+      border-radius: 5px; overflow: hidden;
+      display: flex; margin-bottom: 10px;
     }
 
-    .stacked-segment {
-      height: 100%;
-      transition: width 0.4s ease;
-    }
+    .stacked-segment { height: 100%; transition: width 0.4s ease; }
 
-    .breakdown-legend-pills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
+    .breakdown-legend-pills { display: flex; flex-wrap: wrap; gap: 6px; }
 
     .breakdown-pill {
-      font-size: 10px;
-      font-family: 'JetBrains Mono', monospace;
-      padding: 2px 8px;
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      background: rgba(13, 18, 31, 0.9);
+      font-size: 10px; font-family: 'JetBrains Mono', monospace;
+      padding: 3px 9px; border-radius: 4px;
+      display: flex; align-items: center; gap: 6px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(12,18,33,0.9);
     }
 
-    .breakdown-pill-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-    }
+    .breakdown-pill-dot { width: 7px; height: 7px; border-radius: 50%; }
 
     .regions-list-card {
-      background: rgba(13, 18, 31, 0.7);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 10px 12px;
+      background: rgba(12,18,33,0.7);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px; padding: 14px 16px;
     }
 
     .regions-scroll-list {
-      max-height: 180px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+      max-height: 200px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 6px;
       padding-right: 4px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.1) transparent;
     }
 
     .region-row-item {
-      background: rgba(19, 27, 46, 0.75);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      border-radius: 6px;
-      padding: 8px 10px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      cursor: pointer;
-      transition: all 0.2s;
+      background: rgba(18,26,46,0.75);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 6px; padding: 8px 10px;
+      display: flex; align-items: center;
+      justify-content: space-between; gap: 10px;
+      cursor: pointer; transition: all 0.2s;
     }
 
     .region-row-item:hover {
-      border-color: rgba(6, 182, 212, 0.4);
-      background: rgba(30, 41, 69, 0.85);
+      border-color: rgba(6,182,212,0.35);
+      background: rgba(28,38,65,0.85);
       transform: translateX(2px);
     }
 
     .region-type-badge {
-      font-size: 9px;
-      font-weight: 700;
-      padding: 2px 6px;
-      border-radius: 4px;
-      border: 1px solid;
+      font-size: 9px; font-weight: 700;
+      padding: 2px 6px; border-radius: 4px; border: 1px solid;
     }
 
     .badge-earliest {
-      font-size: 9px;
-      font-family: 'JetBrains Mono', monospace;
-      font-weight: 700;
-      color: #fbbf24;
-      background: rgba(245, 158, 11, 0.15);
-      border: 1px solid rgba(245, 158, 11, 0.35);
-      padding: 2px 6px;
-      border-radius: 4px;
+      font-size: 9px; font-family: 'JetBrains Mono', monospace;
+      font-weight: 700; color: #fbbf24;
+      background: rgba(245,158,11,0.14);
+      border: 1px solid rgba(245,158,11,0.32);
+      padding: 2px 6px; border-radius: 4px;
     }
 
-    /* Change Layer Map Legend */
+    /* â”€â”€ Change Map Legend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .change-map-legend {
-      position: absolute;
-      bottom: 24px;
-      right: 24px;
-      z-index: 1000;
-      background: rgba(13, 18, 31, 0.92);
+      position: absolute; bottom: 24px; right: 24px; z-index: 1000;
+      background: rgba(13,18,31,0.92);
       backdrop-filter: blur(12px);
-      border: 1px solid rgba(6, 182, 212, 0.35);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-      border-radius: 10px;
-      padding: 10px 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      font-size: 11px;
-      color: #f8fafc;
-      min-width: 170px;
+      border: 1px solid rgba(6,182,212,0.32);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      border-radius: 10px; padding: 10px 14px;
+      display: flex; flex-direction: column; gap: 6px;
+      font-size: 11px; color: #f8fafc; min-width: 175px;
     }
 
-    .change-legend-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
+    .change-legend-row { display: flex; align-items: center; gap: 8px; }
 
     .change-legend-box {
-      width: 12px;
-      height: 12px;
-      border-radius: 3px;
-      border: 1px solid rgba(255, 255, 255, 0.3);
+      width: 12px; height: 12px; border-radius: 3px;
+      border: 1px solid rgba(255,255,255,0.3);
     }
 
-    /* ============================================================
-       BINARY MASK GALLERY & SPECTRAL GRAPH STYLES
-       ============================================================ */
+    /* â”€â”€ â­ MASK PAIR CARDS â€” Full Width, Spacious â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .mask-pair-card {
-      background: rgba(13, 18, 31, 0.9);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 12px;
-      padding: 18px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      transition: all 0.2s;
+      background: rgba(11,16,28,0.95);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px; padding: 22px 24px;
+      display: flex; flex-direction: column; gap: 18px;
+      transition: all 0.25s;
+      width: 100%;
     }
 
-    .mask-pair-card:hover, .mask-pair-card.active-pair-card {
-      border-color: rgba(6, 182, 212, 0.5);
-      background: rgba(19, 27, 46, 0.98);
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    .mask-pair-card:hover,
+    .mask-pair-card.active-pair-card {
+      border-color: rgba(6,182,212,0.45);
+      background: rgba(15,22,40,0.98);
+      box-shadow: 0 12px 36px rgba(0,0,0,0.55);
     }
 
     .mask-pair-card.theater-mode {
-      position: fixed !important;
-      top: 0 !important;
-      left: 0 !important;
-      width: 100vw !important;
-      height: 100vh !important;
-      z-index: 10000 !important;
-      border-radius: 0 !important;
-      background: rgba(7, 11, 20, 0.98) !important;
+      position: fixed !important; inset: 0 !important;
+      width: 100vw !important; height: 100vh !important;
+      z-index: 10000 !important; border-radius: 0 !important;
+      background: rgba(6,9,18,0.98) !important;
       backdrop-filter: blur(30px) !important;
       overflow-y: auto !important;
-      padding: 36px 48px !important;
+      padding: 40px 60px !important;
       box-shadow: none !important;
     }
 
-    .mask-pair-card.theater-mode .mask-img-wrap {
-      min-height: 380px !important;
-    }
-
     .mask-pair-header {
-      display: flex;
-      align-items: center;
+      display: flex; align-items: center;
       justify-content: space-between;
-      gap: 10px;
+      flex-wrap: wrap; gap: 10px;
     }
 
+    /* â”€â”€ 6-Panel Band Matrix Grid â€” Full Width, 3+3 Layout â”€â”€â”€â”€â”€ */
     .mask-hex-grid {
       display: grid;
-      grid-template-columns: repeat(6, 1fr);
-      gap: 14px;
-    }
-
-    #temporal-drawer.side-mode .mask-hex-grid {
       grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
+      gap: 16px;
+      width: 100%;
     }
 
-    @media (max-width: 1400px) {
-      .mask-hex-grid {
-        grid-template-columns: repeat(3, 1fr);
-      }
+    @media (max-width: 1100px) {
+      .mask-hex-grid { grid-template-columns: repeat(2, 1fr); }
     }
 
+    @media (max-width: 800px) {
+      .mask-hex-grid { grid-template-columns: 1fr; }
+    }
+
+    /* â”€â”€ Individual Band Image Box â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .mask-box {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      background: rgba(7, 10, 18, 0.7);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 8px;
+      display: flex; flex-direction: column; gap: 8px;
+      background: rgba(7,10,18,0.75);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px; padding: 10px;
       transition: all 0.2s ease;
-      cursor: crosshair;
-      position: relative;
+      cursor: crosshair; position: relative;
     }
 
     .mask-box:hover {
-      border-color: rgba(56, 189, 248, 0.5);
-      box-shadow: 0 0 14px rgba(6, 182, 212, 0.25);
+      border-color: rgba(56,189,248,0.45);
+      box-shadow: 0 0 18px rgba(6,182,212,0.2);
       transform: translateY(-2px);
     }
 
     .mask-box-badge {
-      position: absolute;
-      top: 12px;
-      left: 12px;
-      z-index: 10;
-      font-size: 8px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      padding: 2px 6px;
-      border-radius: 4px;
+      position: absolute; top: 14px; left: 14px; z-index: 10;
+      font-size: 8px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      padding: 2px 7px; border-radius: 4px;
       backdrop-filter: blur(6px);
     }
 
     .mask-box-badge.rgb {
-      background: rgba(15, 23, 42, 0.85);
-      border: 1px solid rgba(148, 163, 184, 0.4);
-      color: #f1f5f9;
+      background: rgba(15,23,42,0.88);
+      border: 1px solid rgba(148,163,184,0.4); color: #f1f5f9;
     }
 
     .mask-box-badge.ndvi {
-      background: rgba(6, 78, 59, 0.85);
-      border: 1px solid rgba(52, 211, 153, 0.5);
-      color: #6ee7b7;
+      background: rgba(6,78,59,0.88);
+      border: 1px solid rgba(52,211,153,0.5); color: #6ee7b7;
     }
 
     .mask-box-badge.binary {
-      background: rgba(8, 51, 68, 0.85);
-      border: 1px solid rgba(6, 182, 212, 0.6);
-      color: #38bdf8;
+      background: rgba(8,51,68,0.88);
+      border: 1px solid rgba(6,182,212,0.6); color: #38bdf8;
     }
 
     .mask-box-badge.verified {
-      background: rgba(120, 53, 15, 0.85);
-      border: 1px solid rgba(245, 158, 11, 0.6);
-      color: #fbbf24;
+      background: rgba(120,53,15,0.88);
+      border: 1px solid rgba(245,158,11,0.6); color: #fbbf24;
     }
 
+    /* â”€â”€ Band Image Wrapper â€” Full Size, No Clipping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .mask-img-wrap {
       width: 100%;
-      aspect-ratio: 1;
-      min-height: 220px;
-      border-radius: 8px;
-      overflow: hidden;
+      aspect-ratio: 1 / 1;
+      border-radius: 8px; overflow: hidden;
       background: #040711;
-      border: 1px solid rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255,255,255,0.1);
       position: relative;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      user-select: none;
-    }
-
-    /* Change Squares Overlay Layer on After Images */
-    .change-squares-layer {
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
-      z-index: 12;
-      transition: opacity 0.2s ease;
-    }
-
-    .change-squares-layer.hidden {
-      display: none !important;
-      opacity: 0;
-    }
-
-    .change-square-box {
-      position: absolute;
-      border: 2px solid #f59e0b;
-      background: rgba(245, 158, 11, 0.2);
-      box-shadow: 0 0 10px rgba(245, 158, 11, 0.4), inset 0 0 8px rgba(245, 158, 11, 0.2);
-      box-sizing: border-box;
-      pointer-events: auto;
-      cursor: pointer;
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      border-radius: 2px;
-    }
-
-    .change-square-box:hover {
-      box-shadow: 0 0 16px rgba(255, 255, 255, 0.85), inset 0 0 12px rgba(255, 255, 255, 0.4);
-      border-color: #ffffff !important;
-      transform: scale(1.02);
-      z-index: 25;
-    }
-
-    .change-square-tag {
-      position: absolute;
-      bottom: 100%;
-      left: -1px;
-      background: #f59e0b;
-      color: #030712;
-      font-weight: 800;
-      font-size: 8px;
-      line-height: 1;
-      padding: 2px 5px;
-      border-radius: 3px 3px 0 0;
-      white-space: nowrap;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      pointer-events: none;
-      box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.4);
+      display: flex; align-items: center; justify-content: center;
+      user-select: none; cursor: crosshair;
     }
 
     .mask-img-wrap img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      display: block;
+      width: 100%; height: 100%;
+      object-fit: contain; display: block;
       transition: transform 0.25s ease;
       pointer-events: none;
     }
 
     .mask-box:hover .mask-img-wrap img {
-      transform: scale(1.02);
-    }
-
-    .sync-crosshair {
-      position: absolute;
-      width: 16px;
-      height: 16px;
-      border: 2px solid #38bdf8;
-      border-radius: 50%;
-      transform: translate(-50%, -50%);
-      pointer-events: none;
-      box-shadow: 0 0 10px #38bdf8, inset 0 0 4px #06b6d4;
-      z-index: 30;
-      display: none;
-    }
-
-    .sync-crosshair::after {
-      content: '';
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 4px;
-      height: 4px;
-      background: #ffffff;
-      border-radius: 50%;
-      transform: translate(-50%, -50%);
-      box-shadow: 0 0 4px #ffffff;
+      transform: scale(1.03);
     }
 
     .mask-box-label {
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: #94a3b8;
-      text-align: center;
-      margin-top: 2px;
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.04em;
+      color: #94a3b8; text-align: center; padding-top: 2px;
     }
 
+    /* â”€â”€ Crosshair Cursor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    .sync-crosshair {
+      position: absolute; width: 14px; height: 14px;
+      border: 2px solid #38bdf8; border-radius: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      box-shadow: 0 0 8px #38bdf8, inset 0 0 3px #06b6d4;
+      z-index: 30; display: none;
+    }
+
+    .sync-crosshair::after {
+      content: ''; position: absolute; top: 50%; left: 50%;
+      width: 3px; height: 3px; background: #fff;
+      border-radius: 50%; transform: translate(-50%, -50%);
+      box-shadow: 0 0 3px #fff;
+    }
+
+    /* â”€â”€ Change Squares Overlay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    .change-squares-layer {
+      position: absolute; inset: 0;
+      pointer-events: none; z-index: 12;
+      transition: opacity 0.2s ease;
+    }
+
+    .change-squares-layer.hidden { display: none !important; opacity: 0; }
+
+    .change-square-box {
+      position: absolute;
+      border: 2px solid #f59e0b;
+      background: rgba(245,158,11,0.18);
+      box-shadow: 0 0 10px rgba(245,158,11,0.4), inset 0 0 8px rgba(245,158,11,0.15);
+      box-sizing: border-box;
+      pointer-events: auto; cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+      border-radius: 2px;
+    }
+
+    .change-square-box:hover {
+      box-shadow: 0 0 18px rgba(255,255,255,0.8), inset 0 0 12px rgba(255,255,255,0.35);
+      border-color: #fff !important;
+      transform: scale(1.02); z-index: 25;
+    }
+
+    .change-square-tag {
+      position: absolute; bottom: 100%; left: -1px;
+      background: #f59e0b; color: #030712;
+      font-weight: 800; font-size: 8px; line-height: 1;
+      padding: 2px 5px; border-radius: 3px 3px 0 0;
+      white-space: nowrap; text-transform: uppercase;
+      letter-spacing: 0.04em; pointer-events: none;
+      box-shadow: 0 -2px 6px rgba(0,0,0,0.4);
+    }
+
+    /* â”€â”€ Filter Audit Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .filter-audit-bar {
-      display: flex;
-      align-items: center;
+      display: flex; align-items: center;
       justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 10px;
-      background: rgba(7, 10, 18, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 10px 14px;
-      font-size: 11px;
+      flex-wrap: wrap; gap: 10px;
+      background: rgba(7,10,18,0.8);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 10px; padding: 12px 16px; font-size: 11px;
     }
 
-    .filter-audit-stat {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
+    .filter-audit-stat { display: flex; align-items: center; gap: 6px; }
 
     .filter-audit-stat b {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
+      font-family: 'JetBrains Mono', monospace; font-size: 12px;
     }
 
-    /* Floating Cursor Spectral Tooltip */
+    /* â”€â”€ Live Cursor Spectral Tooltip (floating) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     #spectral-cursor-tooltip {
-      position: fixed;
-      z-index: 10000;
+      position: fixed; z-index: 10000;
       pointer-events: none;
-      background: rgba(11, 16, 27, 0.96);
+      background: rgba(10,15,26,0.96);
       backdrop-filter: blur(14px);
-      border: 1px solid rgba(6, 182, 212, 0.7);
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), 0 0 16px rgba(6, 182, 212, 0.35);
-      border-radius: 8px;
-      padding: 10px 14px;
-      font-size: 11px;
-      color: #f8fafc;
-      display: none;
-      flex-direction: column;
-      gap: 6px;
+      border: 1px solid rgba(6,182,212,0.65);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.8), 0 0 16px rgba(6,182,212,0.3);
+      border-radius: 8px; padding: 10px 14px;
+      font-size: 11px; color: #f8fafc;
+      display: none; flex-direction: column; gap: 6px;
       min-width: 260px;
       transform: translate(15px, 15px);
       transition: opacity 0.1s ease;
     }
 
-    /* Live Cursor Spectral HUD Bar Inside Each Pair Card */
+    /* â”€â”€ Pair Cursor HUD Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .pair-cursor-hud {
-      background: rgba(8, 12, 22, 0.9);
-      border: 1px solid rgba(6, 182, 212, 0.35);
-      border-radius: 8px;
-      padding: 10px 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      box-shadow: inset 0 0 16px rgba(6, 182, 212, 0.1);
+      background: rgba(7,11,22,0.92);
+      border: 1px solid rgba(6,182,212,0.3);
+      border-radius: 10px; padding: 12px 16px;
+      display: flex; flex-direction: column; gap: 8px;
+      box-shadow: inset 0 0 18px rgba(6,182,212,0.08);
     }
 
     .hud-cursor-lead {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 11px;
-      color: #38bdf8;
-      font-weight: 700;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; color: #38bdf8; font-weight: 700;
       letter-spacing: 0.04em;
     }
 
     .pulse-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #06b6d4;
-      box-shadow: 0 0 8px #06b6d4;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #06b6d4; box-shadow: 0 0 8px #06b6d4;
       animation: pulseAnim 1.5s infinite;
     }
 
     @keyframes pulseAnim {
-      0% { transform: scale(0.9); opacity: 0.8; }
-      50% { transform: scale(1.3); opacity: 1; }
-      100% { transform: scale(0.9); opacity: 0.8; }
+      0%   { transform: scale(0.85); opacity: 0.75; }
+      50%  { transform: scale(1.25); opacity: 1; }
+      100% { transform: scale(0.85); opacity: 0.75; }
     }
 
     .hud-coords {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 10px;
-      color: #94a3b8;
-      font-weight: 500;
+      font-size: 10px; color: #64748b; font-weight: 500;
     }
 
     .hud-spectral-readouts {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 12px;
-      padding-top: 6px;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
+      display: flex; align-items: center;
+      justify-content: space-between; flex-wrap: wrap;
+      gap: 10px; padding-top: 8px;
+      border-top: 1px solid rgba(255,255,255,0.07);
+      font-family: 'JetBrains Mono', monospace; font-size: 11px;
     }
 
-    .readout-group {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
+    .readout-group { display: flex; align-items: center; gap: 8px; }
 
     .readout-tag {
-      font-size: 9px;
-      font-weight: 800;
-      text-transform: uppercase;
-      padding: 2px 6px;
-      border-radius: 4px;
-      letter-spacing: 0.05em;
+      font-size: 9px; font-weight: 800; text-transform: uppercase;
+      padding: 2px 6px; border-radius: 4px; letter-spacing: 0.05em;
     }
 
     .readout-group.before .readout-tag {
-      background: rgba(59, 130, 246, 0.2);
-      border: 1px solid #3b82f6;
-      color: #93c5fd;
+      background: rgba(59,130,246,0.18); border: 1px solid #3b82f6; color: #93c5fd;
     }
 
     .readout-group.after .readout-tag {
-      background: rgba(16, 185, 129, 0.2);
-      border: 1px solid #10b981;
-      color: #6ee7b7;
+      background: rgba(16,185,129,0.18); border: 1px solid #10b981; color: #6ee7b7;
     }
 
-    .readout-item b {
-      color: #f8fafc;
-    }
+    .readout-item b { color: #f8fafc; }
 
     .readout-class {
-      font-size: 10px;
-      font-weight: 700;
-      padding: 2px 6px;
-      border-radius: 4px;
-      background: rgba(255, 255, 255, 0.08);
-      color: #e2e8f0;
+      font-size: 10px; font-weight: 700;
+      padding: 2px 6px; border-radius: 4px;
+      background: rgba(255,255,255,0.07); color: #e2e8f0;
     }
 
     .readout-transition {
-      font-size: 11px;
-      font-weight: 700;
-      color: #fbbf24;
-      padding: 3px 8px;
-      border-radius: 4px;
-      background: rgba(245, 158, 11, 0.15);
-      border: 1px solid rgba(245, 158, 11, 0.4);
+      font-size: 11px; font-weight: 700; color: #fbbf24;
+      padding: 3px 8px; border-radius: 4px;
+      background: rgba(245,158,11,0.14);
+      border: 1px solid rgba(245,158,11,0.35);
     }
 
+    .readout-arrow { color: #4b5563; font-size: 18px; }
 
+    /* â”€â”€ Spectral Plot Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .spectral-plot-card {
-      background: rgba(13, 18, 31, 0.9);
-      border: 1px solid rgba(6, 182, 212, 0.35);
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-      border-radius: 10px;
-      padding: 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+      background: rgba(11,16,28,0.92);
+      border: 1px solid rgba(6,182,212,0.28);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+      border-radius: 12px; padding: 16px;
+      display: flex; flex-direction: column; gap: 14px;
     }
 
     .spectral-plot-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      display: flex; align-items: center; justify-content: space-between;
     }
 
     .spectral-plot-title {
-      font-size: 11px;
-      font-weight: 800;
-      color: #38bdf8;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      font-size: 11px; font-weight: 800; color: #38bdf8;
+      letter-spacing: 0.06em; text-transform: uppercase;
+      display: flex; align-items: center; gap: 6px;
     }
 
     .spectral-bars-wrapper {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
-      background: rgba(7, 10, 18, 0.6);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      border-radius: 8px;
-      padding: 12px;
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      background: rgba(7,10,18,0.6);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 10px; padding: 14px;
     }
 
-    .index-plot-col {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
+    .index-plot-col { display: flex; flex-direction: column; gap: 8px; }
 
     .index-col-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 11px;
-      font-weight: 700;
+      display: flex; align-items: center;
+      justify-content: space-between; font-size: 11px; font-weight: 700;
     }
 
-    .index-col-bars {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
+    .index-col-bars { display: flex; flex-direction: column; gap: 7px; }
 
     .index-bar-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 10px;
+      display: flex; align-items: center; gap: 8px; font-size: 10px;
     }
 
     .index-bar-label {
-      width: 42px;
-      color: #94a3b8;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 9px;
+      width: 42px; color: #94a3b8;
+      font-family: 'JetBrains Mono', monospace; font-size: 9px;
     }
 
     .index-bar-track {
-      flex: 1;
-      height: 12px;
-      background: rgba(255, 255, 255, 0.06);
-      border-radius: 4px;
-      overflow: hidden;
-      position: relative;
+      flex: 1; height: 10px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 5px; overflow: hidden; position: relative;
     }
 
-    .index-bar-fill {
-      height: 100%;
-      border-radius: 4px;
-      transition: width 0.4s ease;
-    }
+    .index-bar-fill { height: 100%; border-radius: 5px; transition: width 0.4s ease; }
 
     .index-bar-val {
-      width: 44px;
-      text-align: right;
+      width: 44px; text-align: right;
       font-family: 'JetBrains Mono', monospace;
-      font-weight: 700;
-      font-size: 10px;
-      color: #f1f5f9;
+      font-weight: 700; font-size: 10px; color: #f1f5f9;
     }
 
     .index-delta-badge {
-      align-self: flex-start;
-      font-size: 9px;
-      font-family: 'JetBrains Mono', monospace;
-      font-weight: 700;
-      padding: 2px 6px;
-      border-radius: 4px;
-      border: 1px solid;
+      align-self: flex-start; font-size: 9px;
+      font-family: 'JetBrains Mono', monospace; font-weight: 700;
+      padding: 2px 6px; border-radius: 4px; border: 1px solid;
     }
 
-    /* ============================================================
-       MULTI-TEMPORAL ALL-EPOCHS NDVI TRAJECTORY & 3-BAND INSPECTOR
-       ============================================================ */
+    /* â”€â”€ All-Epochs NDVI Trajectory Plot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .all-epochs-ndvi-section {
-      background: linear-gradient(180deg, rgba(8, 14, 28, 0.95), rgba(5, 9, 18, 0.98));
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      border-radius: 10px;
-      padding: 12px 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
+      background: linear-gradient(180deg, rgba(7,13,27,0.96), rgba(4,8,17,0.99));
+      border: 1px solid rgba(16,185,129,0.28);
+      border-radius: 12px; padding: 14px 16px;
+      display: flex; flex-direction: column; gap: 10px;
       position: relative;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-      margin-bottom: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04);
     }
 
     .all-epochs-ndvi-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      display: flex; align-items: center; justify-content: space-between;
     }
 
     .all-epochs-hover-hud {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 6px;
-      background: rgba(11, 16, 30, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 6px;
-      padding: 6px 10px;
-      font-size: 10px;
-      font-family: 'JetBrains Mono', monospace;
+      display: flex; align-items: center;
+      justify-content: space-between; flex-wrap: wrap; gap: 6px;
+      background: rgba(10,15,29,0.85);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 6px; padding: 6px 12px;
+      font-size: 10px; font-family: 'JetBrains Mono', monospace;
     }
 
-    .hud-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
+    .hud-item { display: flex; align-items: center; gap: 4px; }
 
     .hud-label {
-      color: #94a3b8;
-      font-size: 9px;
-      font-weight: 700;
-      letter-spacing: 0.03em;
+      color: #64748b; font-size: 9px; font-weight: 700; letter-spacing: 0.03em;
     }
 
-    .hud-val {
-      font-weight: 800;
-      color: #f1f5f9;
-    }
+    .hud-val { font-weight: 800; color: #f1f5f9; }
 
     .all-epochs-chart-wrapper {
-      width: 100%;
-      height: 135px;
-      position: relative;
-      background: #030712;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      overflow: hidden;
-      cursor: crosshair;
+      width: 100%; height: 145px;
+      position: relative; background: #030712;
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 8px; overflow: hidden; cursor: crosshair;
     }
 
-    .all-epochs-svg {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
+    .all-epochs-svg { width: 100%; height: 100%; display: block; }
 
     .all-epochs-tooltip {
-      position: absolute;
-      pointer-events: none;
-      background: rgba(11, 17, 32, 0.96);
+      position: absolute; pointer-events: none;
+      background: rgba(10,16,31,0.97);
       backdrop-filter: blur(12px);
       border: 1px solid #38bdf8;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85), 0 0 16px rgba(56, 189, 248, 0.35);
-      border-radius: 8px;
-      padding: 8px 10px;
-      font-size: 10px;
-      color: #f8fafc;
-      z-index: 100;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.85), 0 0 16px rgba(56,189,248,0.3);
+      border-radius: 8px; padding: 8px 10px;
+      font-size: 10px; color: #f8fafc; z-index: 100;
       min-width: 200px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
+      display: flex; flex-direction: column; gap: 4px;
       transform: translate(-50%, -115%);
       transition: opacity 0.15s ease, transform 0.1s ease;
     }
 
     .tooltip-band-row {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 4px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 9px;
-      text-align: center;
-      margin-top: 2px;
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;
+      font-family: 'JetBrains Mono', monospace; font-size: 9px;
+      text-align: center; margin-top: 2px;
     }
 
     .tooltip-band-pill {
-      background: rgba(255, 255, 255, 0.05);
-      border-radius: 4px;
-      padding: 3px 4px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255,255,255,0.05); border-radius: 4px;
+      padding: 3px 4px; border: 1px solid rgba(255,255,255,0.07);
     }
 
-    /* ============================================================
-       PHASE 1: CHANGE DETECTION TREE WORKFLOW STYLES
-       ============================================================ */
+    /* â”€â”€ Change Tree View Controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .tree-view-toggle-bar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 12px;
-      background: rgba(13, 18, 31, 0.6);
-      padding: 4px;
-      border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex; align-items: center; gap: 6px;
+      margin-bottom: 14px;
+      background: rgba(12,18,33,0.6);
+      padding: 4px; border-radius: 9px;
+      border: 1px solid rgba(255,255,255,0.07);
       width: fit-content;
     }
 
     .tree-toggle-btn {
       background: transparent;
       border: 1px solid transparent;
-      color: #94a3b8;
-      font-size: 11px;
-      font-weight: 700;
-      padding: 6px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      color: #94a3b8; font-size: 11px; font-weight: 700;
+      padding: 6px 14px; border-radius: 6px; cursor: pointer;
+      display: flex; align-items: center; gap: 6px;
       transition: all 0.2s ease;
     }
 
-    .tree-toggle-btn:hover {
-      color: #f1f5f9;
-      background: rgba(255, 255, 255, 0.05);
-    }
+    .tree-toggle-btn:hover { color: #f1f5f9; background: rgba(255,255,255,0.05); }
 
     .tree-toggle-btn.active {
-      background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(99, 102, 241, 0.25));
-      border-color: rgba(6, 182, 212, 0.5);
-      color: #38bdf8;
-      box-shadow: 0 0 12px rgba(6, 182, 212, 0.2);
+      background: linear-gradient(135deg, rgba(6,182,212,0.22), rgba(99,102,241,0.22));
+      border-color: rgba(6,182,212,0.45); color: #38bdf8;
+      box-shadow: 0 0 12px rgba(6,182,212,0.18);
     }
 
+    /* â”€â”€ Tree DAG Viewport â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .tree-workflow-viewport {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      width: 100%;
-      position: relative;
-      padding: 8px 0 20px 0;
+      display: flex; flex-direction: column; align-items: center;
+      width: 100%; position: relative; padding: 8px 0 24px;
     }
 
-    /* Tree Node Base Card */
     .tree-card {
-      background: rgba(13, 20, 36, 0.92);
+      background: rgba(11,18,34,0.94);
       backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 12px;
-      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6);
-      transition: all 0.25s ease;
-      position: relative;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 14px;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.6);
+      transition: all 0.25s ease; position: relative;
     }
 
     .tree-card:hover {
-      border-color: rgba(56, 189, 248, 0.45);
-      box-shadow: 0 12px 36px rgba(6, 182, 212, 0.22);
+      border-color: rgba(56,189,248,0.4);
+      box-shadow: 0 12px 36px rgba(6,182,212,0.18);
     }
 
-    /* Level 0: Root Node (T Images) */
     .tree-node-root {
-      width: 100%;
-      max-width: 900px;
-      border-color: rgba(6, 182, 212, 0.4);
-      background: linear-gradient(180deg, rgba(15, 23, 42, 0.95), rgba(8, 14, 28, 0.92));
-      padding: 14px 18px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+      width: 100%; max-width: 100%;
+      border-color: rgba(6,182,212,0.38);
+      background: linear-gradient(180deg, rgba(13,21,40,0.96), rgba(7,13,26,0.94));
+      padding: 16px 20px;
+      display: flex; flex-direction: column; gap: 14px;
     }
 
     .tree-node-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      padding-bottom: 8px;
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid rgba(255,255,255,0.07); padding-bottom: 8px;
     }
 
     .tree-node-badge {
-      font-size: 9px;
-      font-weight: 800;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      padding: 3px 8px;
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      gap: 5px;
+      font-size: 9px; font-weight: 800;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      padding: 3px 8px; border-radius: 4px;
+      display: flex; align-items: center; gap: 5px;
     }
 
     .tree-node-badge.root {
-      background: rgba(6, 182, 212, 0.15);
-      border: 1px solid rgba(6, 182, 212, 0.4);
-      color: #38bdf8;
+      background: rgba(6,182,212,0.14);
+      border: 1px solid rgba(6,182,212,0.38); color: #38bdf8;
     }
 
     .tree-node-badge.pair {
-      background: rgba(99, 102, 241, 0.15);
-      border: 1px solid rgba(99, 102, 241, 0.4);
-      color: #818cf8;
+      background: rgba(99,102,241,0.14);
+      border: 1px solid rgba(99,102,241,0.38); color: #818cf8;
+    }
+
+    .tree-node-badge.mask {
+      background: rgba(245,158,11,0.14);
+      border: 1px solid rgba(245,158,11,0.38); color: #fbbf24;
+    }
+
+    .tree-node-badge.spectral {
+      background: rgba(16,185,129,0.14);
+      border: 1px solid rgba(16,185,129,0.38); color: #34d399;
+    }
+
+    .tree-node-badge.transition {
+      background: rgba(245,158,11,0.18);
+      border: 1px solid #f59e0b; color: #fbbf24;
+    }
+
+    .tree-node-badge.overall {
+      background: linear-gradient(135deg, rgba(6,182,212,0.22), rgba(99,102,241,0.22));
+      border: 1px solid #38bdf8; color: #38bdf8;
+      box-shadow: 0 0 10px rgba(6,182,212,0.22);
     }
 
     .tree-root-snapshots-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      overflow-x: auto;
-      padding: 4px 0 8px 0;
+      display: flex; align-items: center; gap: 12px;
+      overflow-x: auto; padding: 4px 0 10px;
       scrollbar-width: thin;
-      scrollbar-color: rgba(6, 182, 212, 0.3) transparent;
+      scrollbar-color: rgba(6,182,212,0.25) transparent;
     }
 
     .tree-root-snapshot-card {
-      flex: 0 0 160px;
-      background: rgba(7, 10, 18, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 8px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      transition: all 0.2s ease;
+      flex: 0 0 150px;
+      background: rgba(7,10,18,0.85);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 8px; padding: 8px;
+      display: flex; flex-direction: column; gap: 6px;
+      transition: all 0.2s ease; cursor: pointer;
     }
 
     .tree-root-snapshot-card:hover {
-      border-color: rgba(56, 189, 248, 0.6);
+      border-color: rgba(56,189,248,0.55);
       transform: translateY(-2px);
+      box-shadow: 0 4px 16px rgba(6,182,212,0.2);
     }
 
     .tree-root-thumb {
-      width: 100%;
-      aspect-ratio: 1 / 1;
-      object-fit: contain;
-      background: #030712;
-      border-radius: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      display: block;
-      transition: transform 0.2s ease;
+      width: 100%; aspect-ratio: 1;
+      object-fit: contain; background: #030712;
+      border-radius: 6px; border: 1px solid rgba(255,255,255,0.07);
+      display: block; transition: transform 0.2s ease;
     }
 
-    .tree-root-thumb:hover {
-      transform: scale(1.02);
-    }
+    .tree-root-thumb:hover { transform: scale(1.02); }
 
-    /* Vertical SVG / Stem Connectors */
+    /* â”€â”€ Connector Stems â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .tree-connector-stem {
-      width: 2px;
-      height: 36px;
-      background: linear-gradient(180deg, rgba(6, 182, 212, 0.8), rgba(99, 102, 241, 0.8));
-      margin: 0 auto;
-      position: relative;
+      width: 2px; height: 36px;
+      background: linear-gradient(180deg, rgba(6,182,212,0.8), rgba(99,102,241,0.8));
+      margin: 0 auto; position: relative;
     }
 
     .tree-connector-stem::after {
-      content: '';
-      position: absolute;
-      bottom: -4px;
-      left: -3px;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #818cf8;
-      box-shadow: 0 0 8px #818cf8;
+      content: ''; position: absolute; bottom: -4px; left: -3px;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #818cf8; box-shadow: 0 0 8px #818cf8;
     }
 
-    /* Tree Branching Row (Pairs Level) */
+    /* â”€â”€ Branches Row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .tree-branches-row {
-      display: flex;
-      align-items: flex-start;
-      justify-content: center;
-      gap: 24px;
-      width: 100%;
-      overflow-x: auto;
-      padding: 8px 4px;
+      display: flex; align-items: flex-start; justify-content: center;
+      gap: 24px; width: 100%;
+      overflow-x: auto; padding: 8px 4px;
       scrollbar-width: thin;
     }
 
     .tree-pair-branch {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      flex: 1 1 480px;
-      max-width: 580px;
-      min-width: 360px;
+      display: flex; flex-direction: column; align-items: center;
+      flex: 1 1 500px; max-width: 640px; min-width: 380px;
     }
 
-    /* Level 1: Pair Input Images Card */
     .tree-pair-images-card {
       width: 100%;
-      border-color: rgba(99, 102, 241, 0.35);
-      background: rgba(11, 16, 30, 0.95);
-      padding: 12px 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
+      border-color: rgba(99,102,241,0.32);
+      background: rgba(10,15,28,0.96);
+      padding: 14px 16px;
+      display: flex; flex-direction: column; gap: 12px;
     }
 
     .tree-pair-images-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
     }
 
     .tree-image-box {
-      background: rgba(7, 10, 18, 0.7);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 8px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+      background: rgba(7,10,18,0.7);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px; padding: 10px;
+      display: flex; flex-direction: column; gap: 8px;
       position: relative;
     }
 
-    .tree-image-box.before {
-      border-left: 3px solid #60a5fa;
-    }
-
-    .tree-image-box.after {
-      border-left: 3px solid #34d399;
-    }
+    .tree-image-box.before { border-left: 3px solid #60a5fa; }
+    .tree-image-box.after  { border-left: 3px solid #34d399; }
 
     .tree-image-preview {
-      width: 100%;
-      aspect-ratio: 1 / 1;
-      object-fit: contain;
-      background: #030712;
-      border-radius: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      cursor: crosshair;
-      display: block;
+      width: 100%; aspect-ratio: 1;
+      object-fit: contain; background: #030712;
+      border-radius: 6px; border: 1px solid rgba(255,255,255,0.07);
+      cursor: crosshair; display: block;
       transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
 
     .tree-image-preview:hover {
       transform: scale(1.02);
-      box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);
+      box-shadow: 0 0 16px rgba(56,189,248,0.22);
     }
 
-    /* ============================================================
-       PHASE 2: BINARY CHANGE MASK & DUAL SPECTRAL GRAPHS STYLES
-       ============================================================ */
-    .tree-node-badge.mask {
-      background: rgba(245, 158, 11, 0.15);
-      border: 1px solid rgba(245, 158, 11, 0.4);
-      color: #fbbf24;
-    }
-
-    .tree-node-badge.spectral {
-      background: rgba(16, 185, 129, 0.15);
-      border: 1px solid rgba(16, 185, 129, 0.4);
-      color: #34d399;
-    }
-
-    /* Level 2: Binary Change Mask Node */
+    /* â”€â”€ Binary Change Mask Node â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .tree-mask-card {
       width: 100%;
-      border-color: rgba(245, 158, 11, 0.35);
-      background: rgba(11, 16, 30, 0.95);
-      padding: 12px 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
+      border-color: rgba(245,158,11,0.32);
+      background: rgba(10,15,28,0.96);
+      padding: 14px 16px;
+      display: flex; flex-direction: column; gap: 12px;
     }
 
     .tree-mask-display-wrap {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 8px;
-      background: rgba(7, 10, 18, 0.7);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 10px;
-      position: relative;
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      background: rgba(7,10,18,0.7);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 10px; padding: 12px; position: relative;
     }
 
     .tree-mask-img {
-      width: 100%;
-      aspect-ratio: 1 / 1;
-      max-height: 240px;
-      object-fit: contain;
-      border-radius: 6px;
-      border: 1px solid rgba(245, 158, 11, 0.25);
-      background: #030712;
-      cursor: crosshair;
+      width: 100%; aspect-ratio: 1; max-height: 260px;
+      object-fit: contain; border-radius: 6px;
+      border: 1px solid rgba(245,158,11,0.22);
+      background: #030712; cursor: crosshair;
       transition: all 0.2s ease;
     }
 
     .tree-mask-img:hover {
       border-color: #f59e0b;
-      box-shadow: 0 0 16px rgba(245, 158, 11, 0.3);
+      box-shadow: 0 0 18px rgba(245,158,11,0.28);
     }
 
-    .tree-mask-mode-pills {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
+    .tree-mask-mode-pills { display: flex; align-items: center; gap: 6px; }
 
     .tree-mask-pill-btn {
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      color: #94a3b8;
-      font-size: 10px;
-      font-weight: 700;
-      padding: 3px 8px;
-      border-radius: 4px;
-      cursor: pointer;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #94a3b8; font-size: 10px; font-weight: 700;
+      padding: 3px 8px; border-radius: 4px; cursor: pointer;
       transition: all 0.2s ease;
     }
 
     .tree-mask-pill-btn.active {
-      background: rgba(245, 158, 11, 0.2);
-      border-color: #f59e0b;
-      color: #fbbf24;
+      background: rgba(245,158,11,0.18);
+      border-color: #f59e0b; color: #fbbf24;
     }
 
     .tree-mask-stats-row {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 6px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 9px;
-      text-align: center;
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 6px; font-family: 'JetBrains Mono', monospace;
+      font-size: 9px; text-align: center;
     }
 
     .tree-mask-stat-box {
-      background: rgba(13, 18, 31, 0.7);
-      padding: 6px 4px;
-      border-radius: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
+      background: rgba(12,18,31,0.7);
+      padding: 6px 4px; border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.05);
+      display: flex; flex-direction: column; gap: 2px;
     }
 
-    /* Fork Connector (1 Parent -> 2 Children) */
+    /* â”€â”€ Fork & Spectral Twins â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .tree-fork-wrap {
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      position: relative;
-      margin: 2px 0;
+      width: 100%; display: flex; flex-direction: column;
+      align-items: center; position: relative; margin: 2px 0;
     }
 
-    .tree-fork-svg {
-      width: 100%;
-      height: 38px;
-      overflow: visible;
-    }
+    .tree-fork-svg { width: 100%; height: 38px; overflow: visible; }
 
-    /* Level 3: Dual Spectral Graphs Row (Before & After) */
     .tree-spectral-twins-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      width: 100%;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%;
     }
 
     .tree-spectral-card {
-      background: rgba(11, 16, 30, 0.95);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 10px;
-      padding: 10px 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
+      background: rgba(10,15,28,0.96);
+      border: 1px solid rgba(255,255,255,0.09);
+      border-radius: 12px; padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 8px;
       transition: all 0.2s ease;
     }
 
     .tree-spectral-card.before {
-      border-color: rgba(96, 165, 250, 0.35);
-      background: linear-gradient(180deg, rgba(13, 22, 45, 0.95), rgba(7, 12, 26, 0.95));
+      border-color: rgba(96,165,250,0.32);
+      background: linear-gradient(180deg, rgba(12,20,42,0.96), rgba(7,12,26,0.96));
     }
 
     .tree-spectral-card.after {
-      border-color: rgba(52, 211, 153, 0.35);
-      background: linear-gradient(180deg, rgba(10, 31, 30, 0.95), rgba(6, 18, 19, 0.95));
+      border-color: rgba(52,211,153,0.32);
+      background: linear-gradient(180deg, rgba(9,29,28,0.96), rgba(6,17,18,0.96));
     }
 
-    .tree-spectral-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-    }
+    .tree-spectral-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+    .tree-spectral-card.before:hover { border-color: #60a5fa; }
+    .tree-spectral-card.after:hover  { border-color: #34d399; }
 
-    .tree-spectral-card.before:hover {
-      border-color: #60a5fa;
-    }
-
-    .tree-spectral-card.after:hover {
-      border-color: #34d399;
-    }
-
+    /* â”€â”€ Standard Class Pills â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .standard-class-pill {
-      font-size: 10px;
-      font-weight: 800;
-      padding: 4px 8px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      font-size: 10px; font-weight: 800; padding: 4px 8px;
+      border-radius: 6px; display: flex; align-items: center; gap: 6px;
       letter-spacing: 0.04em;
     }
 
-    .class-dense-veg {
-      background: rgba(16, 185, 129, 0.2);
-      border: 1px solid #10b981;
-      color: #6ee7b7;
-    }
+    .class-dense-veg   { background: rgba(16,185,129,0.18); border: 1px solid #10b981; color: #6ee7b7; }
+    .class-mod-veg     { background: rgba(52,211,153,0.14); border: 1px solid #34d399; color: #a7f3d0; }
+    .class-built-up    { background: rgba(245,158,11,0.18); border: 1px solid #f59e0b; color: #fde68a; }
+    .class-water       { background: rgba(6,182,212,0.18);  border: 1px solid #06b6d4; color: #67e8f9; }
+    .class-bare-soil   { background: rgba(251,146,60,0.18); border: 1px solid #fb923c; color: #fed7aa; }
+    .class-transitional{ background: rgba(148,163,184,0.14); border: 1px solid #94a3b8; color: #cbd5e1; }
 
-    .class-mod-veg {
-      background: rgba(52, 211, 153, 0.15);
-      border: 1px solid #34d399;
-      color: #a7f3d0;
-    }
-
-    .class-built-up {
-      background: rgba(245, 158, 11, 0.2);
-      border: 1px solid #f59e0b;
-      color: #fde68a;
-    }
-
-    .class-water {
-      background: rgba(6, 182, 212, 0.2);
-      border: 1px solid #06b6d4;
-      color: #67e8f9;
-    }
-
-    .class-bare-soil {
-      background: rgba(251, 146, 60, 0.2);
-      border: 1px solid #fb923c;
-      color: #fed7aa;
-    }
-
-    .class-transitional {
-      background: rgba(148, 163, 184, 0.15);
-      border: 1px solid #94a3b8;
-      color: #cbd5e1;
-    }
-
-    /* Plotted Classified Region Map Styles (User Specified) */
+    /* â”€â”€ Classified Plot & Canvas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .tree-classified-plot-wrap {
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      background: #070a12;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 8px;
-      position: relative;
+      width: 100%; display: flex; flex-direction: column; align-items: center;
+      background: #070a12; border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 10px; padding: 10px; position: relative;
     }
 
-    .tree-classified-plot-img {
-      width: 100%;
-      max-height: 240px;
-      aspect-ratio: 1;
-      object-fit: contain;
-      border-radius: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      background: #0b1120;
-      cursor: crosshair;
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-
-    .tree-classified-plot-img:hover {
-      transform: scale(1.02);
-      box-shadow: 0 0 12px rgba(255, 255, 255, 0.15);
-    }
-
+    .tree-classified-plot-img,
     .tree-classified-canvas {
-      width: 100%;
-      max-height: 240px;
-      aspect-ratio: 1;
-      object-fit: contain;
-      border-radius: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      background: #0b1120;
-      cursor: crosshair;
+      width: 100%; max-height: 260px; aspect-ratio: 1;
+      object-fit: contain; border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: #0b1120; cursor: crosshair;
       transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
 
+    .tree-classified-plot-img:hover,
     .tree-classified-canvas:hover {
-      transform: scale(1.02);
-      box-shadow: 0 0 12px rgba(255, 255, 255, 0.15);
+      transform: scale(1.02); box-shadow: 0 0 12px rgba(255,255,255,0.12);
     }
 
     .tree-classified-legend {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      font-size: 8px;
-      color: #94a3b8;
-      margin-top: 4px;
+      display: flex; align-items: center; justify-content: center;
+      gap: 8px; flex-wrap: wrap; font-size: 8px; color: #94a3b8; margin-top: 6px;
     }
 
     .tree-legend-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 2px;
-      display: inline-block;
-      vertical-align: middle;
-      margin-right: 2px;
+      width: 8px; height: 8px; border-radius: 2px;
+      display: inline-block; vertical-align: middle; margin-right: 2px;
     }
 
-    /* Mini Index Meter inside Spectral Cards */
+    /* â”€â”€ Mini Index Meters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .tree-index-meter {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 9px;
-      font-family: 'JetBrains Mono', monospace;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 9px; font-family: 'JetBrains Mono', monospace;
     }
 
-    .tree-meter-name {
-      width: 48px;
-      color: #94a3b8;
-    }
+    .tree-meter-name { width: 48px; color: #94a3b8; }
 
     .tree-meter-track {
-      flex: 1;
-      height: 8px;
-      background: rgba(255, 255, 255, 0.06);
-      border-radius: 4px;
-      overflow: hidden;
-      position: relative;
+      flex: 1; height: 8px; background: rgba(255,255,255,0.06);
+      border-radius: 4px; overflow: hidden; position: relative;
     }
 
-    .tree-meter-fill {
-      height: 100%;
-      border-radius: 4px;
-      transition: width 0.35s ease;
-    }
+    .tree-meter-fill { height: 100%; border-radius: 4px; transition: width 0.35s ease; }
 
-    .tree-meter-val {
-      width: 38px;
-      text-align: right;
-      font-weight: 700;
-      color: #f8fafc;
-    }
+    .tree-meter-val { width: 38px; text-align: right; font-weight: 700; color: #f8fafc; }
 
-    /* ============================================================
-       PHASE 3: "WHAT CHANGED" SYNTHESIS & OVERALL Y YEARS STYLES
-       ============================================================ */
-    .tree-node-badge.transition {
-      background: rgba(245, 158, 11, 0.2);
-      border: 1px solid #f59e0b;
-      color: #fbbf24;
-    }
-
-    .tree-node-badge.overall {
-      background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(99, 102, 241, 0.25));
-      border: 1px solid #38bdf8;
-      color: #38bdf8;
-      box-shadow: 0 0 10px rgba(6, 182, 212, 0.25);
-    }
-
-    /* Level 4: "What Changed" Synthesis Card */
+    /* â”€â”€ Synthesis & Convergence Nodes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .tree-transition-card {
       width: 100%;
-      border-color: rgba(245, 158, 11, 0.4);
-      background: linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(9, 14, 26, 0.96));
-      padding: 12px 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
+      border-color: rgba(245,158,11,0.38);
+      background: linear-gradient(180deg, rgba(16,22,38,0.96), rgba(8,13,25,0.97));
+      padding: 14px 16px;
+      display: flex; flex-direction: column; gap: 12px;
       border-left: 4px solid #f59e0b;
     }
 
     .tree-transition-banner {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      background: rgba(7, 10, 18, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 8px 12px;
-      gap: 8px;
+      display: flex; align-items: center; justify-content: space-between;
+      background: rgba(7,10,18,0.85);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 8px; padding: 8px 12px; gap: 8px;
     }
 
     .tree-transition-flow {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 11px;
-      font-weight: 800;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; font-weight: 800;
     }
 
     .tree-transition-stats-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 8px;
-      font-size: 10px;
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-size: 10px;
     }
 
     .tree-stat-pill-card {
-      background: rgba(13, 18, 31, 0.7);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      border-radius: 6px;
-      padding: 6px 8px;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
+      background: rgba(12,18,31,0.7);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 6px; padding: 6px 8px;
+      display: flex; flex-direction: column; gap: 2px;
     }
 
-    /* Level 5: Grand Convergence Node (Overall Change in Y Years) */
     .tree-grand-trunk-wrap {
-      width: 100%;
-      max-width: 960px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      position: relative;
-      margin: 4px 0 0 0;
+      width: 100%; max-width: 100%;
+      display: flex; flex-direction: column; align-items: center;
+      position: relative; margin: 4px 0 0;
     }
 
     .tree-node-convergence {
       width: 100%;
-      max-width: 900px;
-      border-color: rgba(6, 182, 212, 0.5);
-      background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(8, 14, 28, 0.96));
-      padding: 16px 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7), 0 0 24px rgba(6, 182, 212, 0.15);
+      border-color: rgba(6,182,212,0.45);
+      background: linear-gradient(180deg, rgba(14,22,40,0.98), rgba(7,13,26,0.97));
+      padding: 18px 22px;
+      display: flex; flex-direction: column; gap: 14px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.7), 0 0 24px rgba(6,182,212,0.12);
       border-top: 3px solid #38bdf8;
     }
 
     .tree-convergence-stats {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
     }
 
     .tree-conv-stat-box {
-      background: rgba(7, 10, 18, 0.8);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 8px 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
+      background: rgba(7,10,18,0.8);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 8px; padding: 8px 12px;
+      display: flex; flex-direction: column; gap: 3px;
     }
 
     .tree-conv-stat-num {
-      font-size: 16px;
-      font-weight: 800;
+      font-size: 16px; font-weight: 800;
       font-family: 'JetBrains Mono', monospace;
     }
 
     .tree-trajectory-flow {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      overflow-x: auto;
-      padding: 6px 0;
+      display: flex; align-items: center; gap: 8px;
+      overflow-x: auto; padding: 6px 0;
     }
 
     .tree-trajectory-step {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(13, 18, 31, 0.8);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 6px;
-      padding: 4px 10px;
-      font-size: 11px;
-      font-family: 'JetBrains Mono', monospace;
+      display: flex; align-items: center; gap: 6px;
+      background: rgba(12,18,31,0.8);
+      border: 1px solid rgba(255,255,255,0.09);
+      border-radius: 6px; padding: 4px 10px;
+      font-size: 11px; font-family: 'JetBrains Mono', monospace;
     }
+
+    /* â”€â”€ Results Split Row (side-by-side breakdown & regions) â”€â”€ */
+    .results-split-row {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+      align-items: stretch;
+    }
+
+    @media (max-width: 1000px) {
+      .results-split-row { grid-template-columns: 1fr; }
+    }
+
+    /* â”€â”€ Theater Fullscreen Mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    .mask-pair-card.theater-mode .mask-hex-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    /* â”€â”€ Part 2 Bridge Box â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    .part2-bridge-box {
+      background: linear-gradient(135deg, rgba(6,182,212,0.1), rgba(16,185,129,0.1));
+      border: 1px solid rgba(6,182,212,0.3);
+      border-radius: 12px; padding: 16px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+
+    .part2-bridge-header {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; font-weight: 700; color: #10b981;
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+
+    .payload-preview-code {
+      background: rgba(0,0,0,0.45);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 6px; padding: 8px 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px; color: #a7f3d0;
+      white-space: pre-wrap; word-break: break-all;
+      max-height: 120px; overflow-y: auto;
+    }
+
+    /* â”€â”€ Tag Badge (shared) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    .tag-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px; font-weight: 700;
+      padding: 3px 8px; border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #94a3b8;
+    }
+
   </style>
+
 </head>
 <body>
 
   <!-- Top Aerospace Navigation Bar (Matching System Design) -->
   <header>
     <div class="logo-section">
-      <div class="logo-badge">🛰️</div>
+      <div class="logo-badge">ðŸ›°ï¸</div>
       <div>
         <div class="logo-title">AEROLENS &bull; CHANGE DETECTION STUDIO</div>
         <div class="logo-subtitle">MULTI-TEMPORAL DIFFERENCE INDEXING &bull; DEFENSE DGIS</div>
       </div>
     </div>
     <nav class="nav-links">
-      <a href="/" class="nav-item" id="nav-map" style="text-decoration: none;"><span>🗺️</span> Map & Coverage</a>
-      <a href="/retrieval.html" class="nav-item" id="nav-retrieval" style="text-decoration: none;"><span>🔍</span> Semantic Retrieval</a>
-      <a href="/change.html" class="nav-item active" id="nav-change" style="text-decoration: none;"><span>🔄</span> Change Detection</a>
-      <a href="/clustering.html" class="nav-item" id="nav-clustering" style="text-decoration: none;"><span>📊</span> Clustering</a>
-      <a href="/review.html" class="nav-item" id="nav-review" style="text-decoration: none;"><span>📝</span> Review Tool</a>
+      <a href="/" class="nav-item" id="nav-map" style="text-decoration: none;"><span>ðŸ—ºï¸</span> Map & Coverage</a>
+      <a href="/retrieval.html" class="nav-item" id="nav-retrieval" style="text-decoration: none;"><span>ðŸ”</span> Semantic Retrieval</a>
+      <a href="/change.html" class="nav-item active" id="nav-change" style="text-decoration: none;"><span>ðŸ”„</span> Change Detection</a>
+      <a href="/clustering.html" class="nav-item" id="nav-clustering" style="text-decoration: none;"><span>ðŸ“Š</span> Clustering</a>
+      <a href="/review.html" class="nav-item" id="nav-review" style="text-decoration: none;"><span>ðŸ“</span> Review Tool</a>
     </nav>
     <div class="header-status">
-      <a href="/" class="ingest-aoi-nav-btn" style="text-decoration: none;"><span>🗺️</span> Open Map Explorer</a>
+      <a href="/" class="ingest-aoi-nav-btn" style="text-decoration: none;"><span>ðŸ—ºï¸</span> Open Map Explorer</a>
       <span class="tag-badge" id="hud-status-badge" style="background: rgba(6, 182, 212, 0.2); border-color: #06b6d4; color: #38bdf8;">
         Multi-Temporal Studio Active
       </span>
@@ -2338,7 +1577,7 @@
     <div class="studio-hud-top">
       <div class="hud-card">
         <div class="hud-title-cluster">
-          <div class="hud-title"><span>🛰️</span> Multi-Temporal Observation Studio</div>
+          <div class="hud-title"><span>ðŸ›°ï¸</span> Multi-Temporal Observation Studio</div>
           <div class="hud-subtitle" id="hud-status-text">Loading PostGIS tile footprints...</div>
         </div>
 
@@ -2355,7 +1594,7 @@
 
         <!-- Selected Site Indicator Pill -->
         <div id="hud-selected-container">
-          <span>🎯 Focused Site:</span>
+          <span>ðŸŽ¯ Focused Site:</span>
           <span id="hud-selected-site">--</span>
         </div>
       </div>
@@ -2363,17 +1602,17 @@
       <!-- Map Viewport Controls -->
       <div class="hud-controls-cluster">
         <button class="hud-btn" id="btn-toggle-basemap" title="Switch Base Imagery">
-          <span>🗺️</span> Base: Satellite
+          <span>ðŸ—ºï¸</span> Base: Satellite
         </button>
         <button class="hud-btn" id="btn-reset-view" title="Fit All Ingested Footprints">
-          <span>🎯</span> Fit Grid Bounds
+          <span>ðŸŽ¯</span> Fit Grid Bounds
         </button>
       </div>
     </div>
 
     <!-- Floating Grid Legend (Bottom Left) -->
     <div class="studio-legend">
-      <div class="legend-title"><span>🗺️</span> Tile Grid Footprints</div>
+      <div class="legend-title"><span>ðŸ—ºï¸</span> Tile Grid Footprints</div>
       <div class="legend-item">
         <div class="legend-box multi"></div>
         <div>
@@ -2398,9 +1637,9 @@
         <div class="drawer-header-left">
           <div style="display:flex; align-items:center; gap:12px;">
             <button class="drawer-back-btn" id="btn-close-drawer" title="Return to Map View">
-              <span style="font-size:14px;">←</span> <span>Return to Map</span>
+              <span style="font-size:14px;">â†</span> <span>Return to Map</span>
             </button>
-            <div class="drawer-badge">⚡ MULTI-TEMPORAL CHANGE DETECTION COMMAND CENTER</div>
+            <div class="drawer-badge">âš¡ MULTI-TEMPORAL CHANGE DETECTION COMMAND CENTER</div>
           </div>
           <div class="drawer-title" id="drawer-site-title">Ground Site Inspection</div>
           <div class="drawer-site-key" id="drawer-site-key">Select a tile grid...</div>
@@ -2421,9 +1660,9 @@
         <div class="drawer-section" id="section-top-stack">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <div class="drawer-section-title">
-              <span>🎞️</span> Multi-Temporal Observation Stack (All Chronological Epochs)
+              <span>ðŸŽžï¸</span> Multi-Temporal Observation Stack (All Chronological Epochs)
             </div>
-            <span style="font-size:11px; color:#64748b;">Scroll horizontally to inspect time-series epochs →</span>
+            <span style="font-size:11px; color:#64748b;">Scroll horizontally to inspect time-series epochs â†’</span>
           </div>
           <div class="drawer-section-desc">
             Complete time-series stack for this ground site. Each epoch contains georeferenced multi-band GeoTIFFs and per-pixel bad masks staged on disk:
@@ -2442,7 +1681,7 @@
             <!-- Focused Epoch Inspection (TA vs TB) -->
             <div class="drawer-section" id="section-focused-inspector">
               <div class="drawer-section-title">
-                <span>🔍</span> Focused Epoch Inspection ($T_A$ vs $T_B$)
+                <span>ðŸ”</span> Focused Epoch Inspection ($T_A$ vs $T_B$)
               </div>
               <div class="drawer-section-desc">
                 Select any two observation epochs from the multi-temporal stack to inspect spectral shift:
@@ -2502,7 +1741,7 @@
             <!-- Step-Wise Sequential Transitions -->
             <div class="drawer-section" id="section-sequential-transitions">
               <div class="drawer-section-title">
-                <span>🔄</span> Step-Wise Consecutive Transitions ($T_1 \to T_2 \dots$)
+                <span>ðŸ”„</span> Step-Wise Consecutive Transitions ($T_1 \to T_2 \dots$)
               </div>
               <div class="drawer-section-desc">
                 Consecutive observation intervals for multi-temporal trajectory modeling:
@@ -2518,7 +1757,7 @@
           <div class="drawer-right-col">
             <div class="drawer-section" id="section-change-engine">
               <div class="drawer-section-title" style="color: #38bdf8;">
-                <span>⚡</span> Semantic-Verified Multi-Temporal Change Engine
+                <span>âš¡</span> Semantic-Verified Multi-Temporal Change Engine
               </div>
               <div class="drawer-section-desc">
                 Chains MTKD-ChangeFormer binary inference, independent spectral land-cover classification, semantic false-positive rejection, and morphology rules across all epochs:
@@ -2528,7 +1767,7 @@
                 <!-- Action Bar -->
                 <div class="engine-action-bar">
                   <button class="hud-btn primary" id="btn-run-analysis">
-                    <span id="run-btn-icon">⚡</span>
+                    <span id="run-btn-icon">âš¡</span>
                     <span id="run-btn-text">Run Multi-Temporal Analysis</span>
                   </button>
                   <div style="display:flex; align-items:center; gap:8px;">
@@ -2554,7 +1793,7 @@
                       <div class="stat-label">Earliest Detected Date</div>
                     </div>
                     <div class="analysis-stat-card">
-                      <div class="stat-value" id="stat-total-area">0 m²</div>
+                      <div class="stat-value" id="stat-total-area">0 mÂ²</div>
                       <div class="stat-label">Total Area Changed</div>
                     </div>
                     <div class="analysis-stat-card">
@@ -2566,7 +1805,7 @@
                   <!-- View Mode Tabs (Overall vs Pairwise) -->
                   <div class="view-mode-tabs">
                     <button class="mode-tab active" id="tab-mode-overall">
-                      <span>🗺️</span> Total Cumulative Map
+                      <span>ðŸ—ºï¸</span> Total Cumulative Map
                     </button>
                     <div style="display:flex; align-items:center; gap:6px;">
                       <span style="font-size:10px; color:#94a3b8;">Filter Interval:</span>
@@ -2580,7 +1819,7 @@
                   <div class="spectral-plot-card" id="spectral-plot-card">
                     <div class="spectral-plot-header">
                       <div class="spectral-plot-title">
-                        <span>📊</span> Spectral Index Shift Graph (NDVI &bull; NDBI &bull; NDWI)
+                        <span>ðŸ“Š</span> Spectral Index Shift Graph (NDVI &bull; NDBI &bull; NDWI)
                       </div>
                       <span class="tag-badge" id="spectral-target-badge" style="font-size: 9px; color: #38bdf8; border-color: rgba(6,182,212,0.4);">
                         Active Target: Site Mean
@@ -2590,7 +1829,7 @@
                     <div class="all-epochs-ndvi-section" id="all-epochs-ndvi-section">
                       <div class="all-epochs-ndvi-header">
                         <div style="display:flex; align-items:center; gap:6px;">
-                          <span style="font-size:12px;">📈</span>
+                          <span style="font-size:12px;">ðŸ“ˆ</span>
                           <span style="font-size:10px; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.05em;">
                             All Observations NDVI Trajectory
                           </span>
@@ -2611,15 +1850,15 @@
                           <span class="hud-val" id="hud-epoch-date">--</span>
                         </div>
                         <div class="hud-item ndvi">
-                          <span class="hud-label">🌿 NDVI:</span>
+                          <span class="hud-label">ðŸŒ¿ NDVI:</span>
                           <span class="hud-val" id="hud-epoch-ndvi" style="color:#10b981;">--</span>
                         </div>
                         <div class="hud-item ndwi">
-                          <span class="hud-label">💧 NDWI:</span>
+                          <span class="hud-label">ðŸ’§ NDWI:</span>
                           <span class="hud-val" id="hud-epoch-ndwi" style="color:#06b6d4;">--</span>
                         </div>
                         <div class="hud-item ndbi">
-                          <span class="hud-label">🏗️ NDBI:</span>
+                          <span class="hud-label">ðŸ—ï¸ NDBI:</span>
                           <span class="hud-val" id="hud-epoch-ndbi" style="color:#f59e0b;">--</span>
                         </div>
                       </div>
@@ -2643,7 +1882,7 @@
                       <!-- NDVI Column (Vegetation) -->
                       <div class="index-plot-col">
                         <div class="index-col-header">
-                          <span style="color: #10b981;">🌿 NDVI (Veg)</span>
+                          <span style="color: #10b981;">ðŸŒ¿ NDVI (Veg)</span>
                           <span class="index-delta-badge" id="ndvi-delta-badge">--</span>
                         </div>
                         <div class="index-col-bars">
@@ -2668,7 +1907,7 @@
                       <!-- NDBI Column (Built-up / Urban) -->
                       <div class="index-plot-col">
                         <div class="index-col-header">
-                          <span style="color: #f59e0b;">🏗️ NDBI (Urban)</span>
+                          <span style="color: #f59e0b;">ðŸ—ï¸ NDBI (Urban)</span>
                           <span class="index-delta-badge" id="ndbi-delta-badge">--</span>
                         </div>
                         <div class="index-col-bars">
@@ -2693,7 +1932,7 @@
                       <!-- NDWI Column (Water) -->
                       <div class="index-plot-col">
                         <div class="index-col-header">
-                          <span style="color: #06b6d4;">💧 NDWI (Water)</span>
+                          <span style="color: #06b6d4;">ðŸ’§ NDWI (Water)</span>
                           <span class="index-delta-badge" id="ndwi-delta-badge">--</span>
                         </div>
                         <div class="index-col-bars">
@@ -2721,7 +1960,7 @@
                   <div class="breakdown-card" id="yearwise-masks-card">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
                       <span style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.05em;">
-                        <span>🛰️</span> Multi-Temporal Change Pipeline Architecture
+                        <span>ðŸ›°ï¸</span> Multi-Temporal Change Pipeline Architecture
                       </span>
                       <span style="font-size:10px; color:#94a3b8;" id="mask-gallery-count-lbl">-- intervals</span>
                     </div>
@@ -2729,10 +1968,10 @@
                     <!-- View Switcher Tabs -->
                     <div class="tree-view-toggle-bar">
                       <button class="tree-toggle-btn active" id="btn-toggle-tree-view">
-                        <span>🌳</span> Change Tree Workflow (DAG)
+                        <span>ðŸŒ³</span> Change Tree Workflow (DAG)
                       </button>
                       <button class="tree-toggle-btn" id="btn-toggle-matrix-view">
-                        <span>🗂️</span> Multi-Band Matrix Grid
+                        <span>ðŸ—‚ï¸</span> Multi-Band Matrix Grid
                       </button>
                     </div>
 
@@ -2777,7 +2016,7 @@
                     <div class="regions-list-card">
                       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
                         <span style="font-size:11px; font-weight:700; color:#e2e8f0; text-transform:uppercase; letter-spacing:0.05em;">
-                          <span>📍</span> Detected Change Polygons
+                          <span>ðŸ“</span> Detected Change Polygons
                         </span>
                         <span style="font-size:10px; color:#38bdf8;" id="regions-count-pill">-- regions</span>
                       </div>
@@ -2800,7 +2039,7 @@
     <!-- Floating Change Type Map Legend (Bottom Right) -->
     <div class="change-map-legend" id="change-map-legend" style="display: none;">
       <div style="font-size:10px; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:4px;">
-        <span>🎯</span> Change Classifications
+        <span>ðŸŽ¯</span> Change Classifications
       </div>
       <div class="change-legend-row">
         <div class="change-legend-box" style="background: rgba(245, 158, 11, 0.7); border-color: #f59e0b;"></div>
@@ -2875,6 +2114,6 @@
   </div>
 
   <!-- Dedicated Studio Controller -->
-  <script src="/frontend/change.js?v=20260914_changesquares_v13"></script>
+  <script src="/frontend/change.js?v=20260914_uioverhaul_v14"></script>
 </body>
 </html>
