@@ -237,70 +237,58 @@
     }
 
     /* ============================================================
-       MULTI-TEMPORAL TIME-SERIES DRAWER STYLES & WORKBENCH MODES
+       MULTI-TEMPORAL TIME-SERIES FULLSCREEN WORKBENCH
        ============================================================ */
-    /* Expansive Full-Screen Studio Workbench Mode vs Docked Side-Mode */
     #temporal-drawer {
       position: absolute;
       top: 0;
-      right: -750px;
-      left: auto;
-      width: 700px;
-      max-width: 95vw;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100%;
       height: 100%;
       z-index: 1250;
-      background: rgba(10, 15, 26, 0.98);
+      background: rgba(8, 12, 22, 0.98);
       backdrop-filter: blur(28px);
       -webkit-backdrop-filter: blur(28px);
-      border-left: 1px solid rgba(6, 182, 212, 0.4);
-      box-shadow: -20px 0 60px rgba(0, 0, 0, 0.9);
+      border: none;
+      box-shadow: none;
       display: flex;
       flex-direction: column;
-      transition: right 0.35s cubic-bezier(0.16, 1, 0.3, 1), width 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+      transform: translateX(100%);
+      opacity: 0;
+      pointer-events: none;
       overflow: hidden;
     }
 
     #temporal-drawer.open {
-      right: 0;
-      left: auto;
-      width: 700px;
+      transform: translateX(0);
+      opacity: 1;
+      pointer-events: auto;
     }
 
-    /* Optional Docked Side-Mode (explicit) */
-    #temporal-drawer.side-mode {
-      left: auto !important;
-      right: 0 !important;
-      width: 700px !important;
-    }
-
-    /* Expansive Full-Screen Studio Workbench Mode */
-    #temporal-drawer.open.full-mode {
-      left: 65px !important;
-      right: 0 !important;
-      width: calc(100vw - 65px) !important;
-    }
-
-    .drawer-expand-btn {
+    .drawer-back-btn {
       background: rgba(6, 182, 212, 0.15);
       border: 1px solid rgba(6, 182, 212, 0.4);
       color: #38bdf8;
       border-radius: 8px;
-      padding: 6px 12px;
+      padding: 6px 14px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      font-size: 11px;
+      gap: 8px;
+      font-size: 12px;
       font-weight: 700;
       letter-spacing: 0.04em;
       transition: all 0.2s;
     }
 
-    .drawer-expand-btn:hover {
+    .drawer-back-btn:hover {
       background: rgba(6, 182, 212, 0.3);
       border-color: #38bdf8;
-      box-shadow: 0 0 14px rgba(6, 182, 212, 0.4);
-      transform: translateY(-1px);
+      box-shadow: 0 0 16px rgba(6, 182, 212, 0.4);
+      transform: translateX(-2px);
     }
 
     .drawer-header {
@@ -370,28 +358,51 @@
     .drawer-body {
       flex: 1;
       overflow-y: auto;
-      padding: 20px 24px;
+      padding: 16px 24px 28px 24px;
       display: flex;
       flex-direction: column;
-      gap: 18px;
+      gap: 16px;
+    }
+
+    .drawer-workbench-grid {
+      display: grid;
+      grid-template-columns: 460px minmax(620px, 1fr);
+      gap: 20px;
+      align-items: flex-start;
+      width: 100%;
     }
 
     .drawer-left-col, .drawer-right-col {
       display: flex;
       flex-direction: column;
-      gap: 18px;
-      width: 100%;
+      gap: 16px;
+      min-width: 0;
     }
 
-    /* When Fullscreen Studio Mode is active: 2-Column Responsive Dashboard Workbench */
-    #temporal-drawer.full-mode .drawer-body {
+    .results-split-row {
       display: grid;
-      grid-template-columns: minmax(440px, 480px) minmax(620px, 1fr);
-      gap: 24px;
-      align-items: flex-start;
-      max-width: 1760px;
-      margin: 0 auto;
-      width: 100%;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    @media (max-width: 1350px) {
+      .drawer-workbench-grid {
+        grid-template-columns: 420px 1fr;
+        gap: 16px;
+      }
+    }
+
+    @media (max-width: 1120px) {
+      .results-split-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 1080px) {
+      .drawer-workbench-grid {
+        grid-template-columns: 1fr;
+      }
     }
 
     .drawer-section {
@@ -2334,26 +2345,34 @@
       <!-- Drawer Header -->
       <div class="drawer-header">
         <div class="drawer-header-left">
-          <div class="drawer-badge">⚡ MULTI-TEMPORAL ASSET STACK LOCKED</div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <button class="drawer-back-btn" id="btn-close-drawer" title="Return to Map View">
+              <span style="font-size:14px;">←</span> <span>Return to Map</span>
+            </button>
+            <div class="drawer-badge">⚡ MULTI-TEMPORAL CHANGE DETECTION COMMAND CENTER</div>
+          </div>
           <div class="drawer-title" id="drawer-site-title">Ground Site Inspection</div>
           <div class="drawer-site-key" id="drawer-site-key">Select a tile grid...</div>
         </div>
-        <div style="display:flex; align-items:center; gap:8px;">
-          <button class="drawer-expand-btn" id="btn-expand-drawer" title="Toggle Fullscreen Multi-Temporal Studio Workbench">
-            <span id="expand-icon">⤢</span> <span id="expand-text">Expand Studio</span>
-          </button>
-          <button class="drawer-close-btn" id="btn-close-drawer" title="Close Panel">&times;</button>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div class="hud-stat-item" style="padding: 4px 14px; background: rgba(13,18,31,0.8); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;">
+            <span class="hud-stat-num cyan" id="bridge-epoch-count" style="font-size: 13px;">-- epochs</span>
+            <span class="hud-stat-label">Timeline Depth</span>
+          </div>
+          <button class="drawer-close-btn" id="btn-close-drawer-icon" title="Close Panel">&times;</button>
         </div>
       </div>
 
       <!-- Drawer Body -->
       <div class="drawer-body">
-        <div class="drawer-left-col">
 
-        <!-- 1. Multi-Temporal Filmstrip Stack -->
-        <div class="drawer-section">
-          <div class="drawer-section-title">
-            <span>🎞️</span> Multi-Temporal Observation Stack (All Chronological Epochs)
+        <!-- 1. TOP DECK: Multi-Temporal Filmstrip Stack (Spans full screen width) -->
+        <div class="drawer-section" id="section-top-stack">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div class="drawer-section-title">
+              <span>🎞️</span> Multi-Temporal Observation Stack (All Chronological Epochs)
+            </div>
+            <span style="font-size:11px; color:#64748b;">Scroll horizontally to inspect time-series epochs →</span>
           </div>
           <div class="drawer-section-desc">
             Complete time-series stack for this ground site. Each epoch contains georeferenced multi-band GeoTIFFs and per-pixel bad masks staged on disk:
@@ -2363,356 +2382,368 @@
           </div>
         </div>
 
-        <!-- 2. Step-Wise Sequential Transitions -->
-        <div class="drawer-section">
-          <div class="drawer-section-title">
-            <span>🔄</span> Step-Wise Consecutive Transitions ($T_1 \to T_2 \dots$)
-          </div>
-          <div class="drawer-section-desc">
-            Consecutive observation intervals for multi-temporal trajectory modeling:
-          </div>
-          <div class="transitions-list" id="sequential-transitions-container">
-            <!-- Dynamically populated transitions -->
-          </div>
-        </div>
+        <!-- 2-COLUMN GIS WORKBENCH GRID -->
+        <div class="drawer-workbench-grid">
 
-        <!-- 3. Sub-Interval Dual Inspector -->
-        <div class="drawer-section">
-          <div class="drawer-section-title">
-            <span>🔍</span> Focused Epoch Inspection ($T_A$ vs $T_B$)
-          </div>
-          <div class="drawer-section-desc">
-            Select any two observation epochs from the multi-temporal stack to inspect spectral shift:
-          </div>
+          <!-- LEFT COLUMN: Focused Dual Inspector & Sequential Transitions -->
+          <div class="drawer-left-col">
 
-          <div class="subinterval-grid">
-            <!-- Epoch A Card -->
-            <div class="inspector-card card-t1">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-size:11px; font-weight:800; color:#60a5fa;">Epoch A (Baseline)</span>
-                <span class="tag-badge" id="t1-badge-date" style="font-size:9px;">--</span>
+            <!-- Focused Epoch Inspection (TA vs TB) -->
+            <div class="drawer-section" id="section-focused-inspector">
+              <div class="drawer-section-title">
+                <span>🔍</span> Focused Epoch Inspection ($T_A$ vs $T_B$)
               </div>
-              <select class="card-date-select" id="select-t1-date" title="Select Baseline Epoch"></select>
-              <div class="stack-thumb-box">
-                <img id="t1-thumb-img" class="stack-thumb-img" src="" alt="T1 Preview" />
-              </div>
-              <div style="font-size:10px; color:#94a3b8; display:flex; flex-direction:column; gap:3px;">
-                <div style="display:flex; justify-content:space-between;"><span>Cloud Cover:</span><b id="t1-cloud-stat" style="color:#e2e8f0;">--%</b></div>
-                <div style="display:flex; justify-content:space-between;"><span>Mean NDVI:</span><b id="t1-ndvi-stat" style="color:#e2e8f0;">--</b></div>
-              </div>
-            </div>
-
-            <!-- Epoch B Card -->
-            <div class="inspector-card card-t2">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-size:11px; font-weight:800; color:#34d399;">Epoch B (Subsequent)</span>
-                <span class="tag-badge" id="t2-badge-date" style="font-size:9px;">--</span>
-              </div>
-              <select class="card-date-select" id="select-t2-date" title="Select Subsequent Epoch"></select>
-              <div class="stack-thumb-box">
-                <img id="t2-thumb-img" class="stack-thumb-img" src="" alt="T2 Preview" />
-              </div>
-              <div style="font-size:10px; color:#94a3b8; display:flex; flex-direction:column; gap:3px;">
-                <div style="display:flex; justify-content:space-between;"><span>Cloud Cover:</span><b id="t2-cloud-stat" style="color:#e2e8f0;">--%</b></div>
-                <div style="display:flex; justify-content:space-between;"><span>Mean NDVI:</span><b id="t2-ndvi-stat" style="color:#e2e8f0;">--</b></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Delta variance pills -->
-          <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-top:6px;">
-            <div style="background:rgba(13,18,31,0.7); padding:6px; border-radius:6px; text-align:center;">
-              <div style="font-size:12px; font-weight:800; color:#38bdf8; font-family:'JetBrains Mono',monospace;" id="delta-time">--</div>
-              <div style="font-size:9px; color:#64748b; text-transform:uppercase;">Elapsed Time</div>
-            </div>
-            <div style="background:rgba(13,18,31,0.7); padding:6px; border-radius:6px; text-align:center;">
-              <div style="font-size:12px; font-weight:800; color:#10b981; font-family:'JetBrains Mono',monospace;" id="delta-ndvi">--</div>
-              <div style="font-size:9px; color:#64748b; text-transform:uppercase;">&Delta; NDVI</div>
-            </div>
-            <div style="background:rgba(13,18,31,0.7); padding:6px; border-radius:6px; text-align:center;">
-              <div style="font-size:12px; font-weight:800; color:#f59e0b; font-family:'JetBrains Mono',monospace;" id="delta-ndbi">--</div>
-              <div style="font-size:9px; color:#64748b; text-transform:uppercase;">&Delta; NDBI</div>
-            </div>
-          </div>
-        </div>
-        </div><!-- .drawer-left-col -->
-
-        <!-- 4. Semantic-Verified Multi-Temporal Change Engine -->
-        <div class="drawer-right-col">
-        <div class="drawer-section" id="section-change-engine">
-          <div class="drawer-section-title" style="color: #38bdf8;">
-            <span>⚡</span> Semantic-Verified Multi-Temporal Change Engine
-          </div>
-          <div class="drawer-section-desc">
-            Chains MTKD-ChangeFormer binary inference, independent spectral land-cover classification, semantic false-positive rejection, and morphology rules across all epochs:
-          </div>
-
-          <div class="change-engine-panel">
-            <!-- Action Bar -->
-            <div class="engine-action-bar">
-              <button class="hud-btn primary" id="btn-run-analysis">
-                <span id="run-btn-icon">⚡</span>
-                <span id="run-btn-text">Run Multi-Temporal Analysis</span>
-              </button>
-              <div style="display:flex; align-items:center; gap:8px;">
-                <label class="toggle-container" title="Force re-running ML models even if cached in PostgreSQL">
-                  <input type="checkbox" id="chk-force-refresh">
-                  <span>Force Re-run</span>
-                </label>
-                <span class="tag-badge" id="analysis-status-badge">Ready</span>
-              </div>
-            </div>
-
-            <!-- Analysis Results View (Initially hidden, revealed once analyzed or cached) -->
-            <div id="analysis-results-container" style="display: none; flex-direction: column; gap: 12px; margin-top: 10px;">
-              
-              <!-- Key Metrics Grid -->
-              <div class="analysis-stats-grid">
-                <div class="analysis-stat-card">
-                  <div class="stat-value cyan" id="stat-region-count">0</div>
-                  <div class="stat-label">Changed Regions</div>
-                </div>
-                <div class="analysis-stat-card">
-                  <div class="stat-value gold" id="stat-earliest-date">--</div>
-                  <div class="stat-label">Earliest Detected Date</div>
-                </div>
-                <div class="analysis-stat-card">
-                  <div class="stat-value" id="stat-total-area">0 m²</div>
-                  <div class="stat-label">Total Area Changed</div>
-                </div>
-                <div class="analysis-stat-card">
-                  <div class="stat-value green" id="stat-dominant-type">--</div>
-                  <div class="stat-label">Primary Transition</div>
-                </div>
+              <div class="drawer-section-desc">
+                Select any two observation epochs from the multi-temporal stack to inspect spectral shift:
               </div>
 
-              <!-- View Mode Tabs (Overall vs Pairwise) -->
-              <div class="view-mode-tabs">
-                <button class="mode-tab active" id="tab-mode-overall">
-                  <span>🗺️</span> Total Cumulative Map
-                </button>
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <span style="font-size:10px; color:#94a3b8;">Filter Interval:</span>
-                  <select class="card-date-select" id="select-pairwise-interval" style="width: auto; padding: 4px 8px;">
-                    <option value="overall">All Pairs Combined</option>
-                  </select>
-                </div>
-              </div>
-
-              <!-- Plotted Spectral Index Shift Graph (NDVI, NDBI, NDWI) -->
-              <div class="spectral-plot-card" id="spectral-plot-card">
-                <div class="spectral-plot-header">
-                  <div class="spectral-plot-title">
-                    <span>📊</span> Spectral Index Shift Graph (NDVI &bull; NDBI &bull; NDWI)
+              <div class="subinterval-grid">
+                <!-- Epoch A Card -->
+                <div class="inspector-card card-t1">
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:11px; font-weight:800; color:#60a5fa;">Epoch A (Baseline)</span>
+                    <span class="tag-badge" id="t1-badge-date" style="font-size:9px;">--</span>
                   </div>
-                  <span class="tag-badge" id="spectral-target-badge" style="font-size: 9px; color: #38bdf8; border-color: rgba(6,182,212,0.4);">
-                    Active Target: Site Mean
-                  </span>
+                  <select class="card-date-select" id="select-t1-date" title="Select Baseline Epoch"></select>
+                  <div class="stack-thumb-box">
+                    <img id="t1-thumb-img" class="stack-thumb-img" src="" alt="T1 Preview" />
+                  </div>
+                  <div style="font-size:10px; color:#94a3b8; display:flex; flex-direction:column; gap:3px;">
+                    <div style="display:flex; justify-content:space-between;"><span>Cloud Cover:</span><b id="t1-cloud-stat" style="color:#e2e8f0;">--%</b></div>
+                    <div style="display:flex; justify-content:space-between;"><span>Mean NDVI:</span><b id="t1-ndvi-stat" style="color:#e2e8f0;">--</b></div>
+                  </div>
                 </div>
-                <!-- Multi-Temporal All-Epochs NDVI Trajectory Plot & Multi-Band Inspector -->
-                <div class="all-epochs-ndvi-section" id="all-epochs-ndvi-section">
-                  <div class="all-epochs-ndvi-header">
+
+                <!-- Epoch B Card -->
+                <div class="inspector-card card-t2">
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:11px; font-weight:800; color:#34d399;">Epoch B (Subsequent)</span>
+                    <span class="tag-badge" id="t2-badge-date" style="font-size:9px;">--</span>
+                  </div>
+                  <select class="card-date-select" id="select-t2-date" title="Select Subsequent Epoch"></select>
+                  <div class="stack-thumb-box">
+                    <img id="t2-thumb-img" class="stack-thumb-img" src="" alt="T2 Preview" />
+                  </div>
+                  <div style="font-size:10px; color:#94a3b8; display:flex; flex-direction:column; gap:3px;">
+                    <div style="display:flex; justify-content:space-between;"><span>Cloud Cover:</span><b id="t2-cloud-stat" style="color:#e2e8f0;">--%</b></div>
+                    <div style="display:flex; justify-content:space-between;"><span>Mean NDVI:</span><b id="t2-ndvi-stat" style="color:#e2e8f0;">--</b></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Delta variance pills -->
+              <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-top:6px;">
+                <div style="background:rgba(13,18,31,0.7); padding:6px; border-radius:6px; text-align:center;">
+                  <div style="font-size:12px; font-weight:800; color:#38bdf8; font-family:'JetBrains Mono',monospace;" id="delta-time">--</div>
+                  <div style="font-size:9px; color:#64748b; text-transform:uppercase;">Elapsed Time</div>
+                </div>
+                <div style="background:rgba(13,18,31,0.7); padding:6px; border-radius:6px; text-align:center;">
+                  <div style="font-size:12px; font-weight:800; color:#10b981; font-family:'JetBrains Mono',monospace;" id="delta-ndvi">--</div>
+                  <div style="font-size:9px; color:#64748b; text-transform:uppercase;">&Delta; NDVI</div>
+                </div>
+                <div style="background:rgba(13,18,31,0.7); padding:6px; border-radius:6px; text-align:center;">
+                  <div style="font-size:12px; font-weight:800; color:#f59e0b; font-family:'JetBrains Mono',monospace;" id="delta-ndbi">--</div>
+                  <div style="font-size:9px; color:#64748b; text-transform:uppercase;">&Delta; NDBI</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step-Wise Sequential Transitions -->
+            <div class="drawer-section" id="section-sequential-transitions">
+              <div class="drawer-section-title">
+                <span>🔄</span> Step-Wise Consecutive Transitions ($T_1 \to T_2 \dots$)
+              </div>
+              <div class="drawer-section-desc">
+                Consecutive observation intervals for multi-temporal trajectory modeling:
+              </div>
+              <div class="transitions-list" id="sequential-transitions-container">
+                <!-- Dynamically populated transitions -->
+              </div>
+            </div>
+
+          </div><!-- .drawer-left-col -->
+
+          <!-- RIGHT COLUMN: Semantic-Verified Multi-Temporal Change Engine -->
+          <div class="drawer-right-col">
+            <div class="drawer-section" id="section-change-engine">
+              <div class="drawer-section-title" style="color: #38bdf8;">
+                <span>⚡</span> Semantic-Verified Multi-Temporal Change Engine
+              </div>
+              <div class="drawer-section-desc">
+                Chains MTKD-ChangeFormer binary inference, independent spectral land-cover classification, semantic false-positive rejection, and morphology rules across all epochs:
+              </div>
+
+              <div class="change-engine-panel">
+                <!-- Action Bar -->
+                <div class="engine-action-bar">
+                  <button class="hud-btn primary" id="btn-run-analysis">
+                    <span id="run-btn-icon">⚡</span>
+                    <span id="run-btn-text">Run Multi-Temporal Analysis</span>
+                  </button>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <label class="toggle-container" title="Force re-running ML models even if cached in PostgreSQL">
+                      <input type="checkbox" id="chk-force-refresh">
+                      <span>Force Re-run</span>
+                    </label>
+                    <span class="tag-badge" id="analysis-status-badge">Ready</span>
+                  </div>
+                </div>
+
+                <!-- Analysis Results View (Initially hidden, revealed once analyzed or cached) -->
+                <div id="analysis-results-container" style="display: none; flex-direction: column; gap: 12px; margin-top: 10px;">
+                  
+                  <!-- Key Metrics Grid -->
+                  <div class="analysis-stats-grid">
+                    <div class="analysis-stat-card">
+                      <div class="stat-value cyan" id="stat-region-count">0</div>
+                      <div class="stat-label">Changed Regions</div>
+                    </div>
+                    <div class="analysis-stat-card">
+                      <div class="stat-value gold" id="stat-earliest-date">--</div>
+                      <div class="stat-label">Earliest Detected Date</div>
+                    </div>
+                    <div class="analysis-stat-card">
+                      <div class="stat-value" id="stat-total-area">0 m²</div>
+                      <div class="stat-label">Total Area Changed</div>
+                    </div>
+                    <div class="analysis-stat-card">
+                      <div class="stat-value green" id="stat-dominant-type">--</div>
+                      <div class="stat-label">Primary Transition</div>
+                    </div>
+                  </div>
+
+                  <!-- View Mode Tabs (Overall vs Pairwise) -->
+                  <div class="view-mode-tabs">
+                    <button class="mode-tab active" id="tab-mode-overall">
+                      <span>🗺️</span> Total Cumulative Map
+                    </button>
                     <div style="display:flex; align-items:center; gap:6px;">
-                      <span style="font-size:12px;">📈</span>
-                      <span style="font-size:10px; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.05em;">
-                        All Observations NDVI Trajectory
+                      <span style="font-size:10px; color:#94a3b8;">Filter Interval:</span>
+                      <select class="card-date-select" id="select-pairwise-interval" style="width: auto; padding: 4px 8px;">
+                        <option value="overall">All Pairs Combined</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <!-- Plotted Spectral Index Shift Graph (NDVI, NDBI, NDWI) -->
+                  <div class="spectral-plot-card" id="spectral-plot-card">
+                    <div class="spectral-plot-header">
+                      <div class="spectral-plot-title">
+                        <span>📊</span> Spectral Index Shift Graph (NDVI &bull; NDBI &bull; NDWI)
+                      </div>
+                      <span class="tag-badge" id="spectral-target-badge" style="font-size: 9px; color: #38bdf8; border-color: rgba(6,182,212,0.4);">
+                        Active Target: Site Mean
                       </span>
                     </div>
-                    <span class="tag-badge" id="all-epochs-count-badge" style="font-size:9px; color:#10b981; border-color:rgba(16,185,129,0.4);">
-                      -- Epochs
-                    </span>
-                  </div>
-
-                  <!-- Live Cursor Multi-Band HUD Ribbon (updates on cursor move across timeline) -->
-                  <div class="all-epochs-hover-hud" id="all-epochs-hover-hud">
-                    <div class="hud-item epoch">
-                      <span class="hud-label">EPOCH:</span>
-                      <span class="hud-val" id="hud-epoch-name">Hover Timeline</span>
-                    </div>
-                    <div class="hud-item date">
-                      <span class="hud-label">DATE:</span>
-                      <span class="hud-val" id="hud-epoch-date">--</span>
-                    </div>
-                    <div class="hud-item ndvi">
-                      <span class="hud-label">🌿 NDVI:</span>
-                      <span class="hud-val" id="hud-epoch-ndvi" style="color:#10b981;">--</span>
-                    </div>
-                    <div class="hud-item ndwi">
-                      <span class="hud-label">💧 NDWI:</span>
-                      <span class="hud-val" id="hud-epoch-ndwi" style="color:#06b6d4;">--</span>
-                    </div>
-                    <div class="hud-item ndbi">
-                      <span class="hud-label">🏗️ NDBI:</span>
-                      <span class="hud-val" id="hud-epoch-ndbi" style="color:#f59e0b;">--</span>
-                    </div>
-                  </div>
-
-                  <!-- Interactive SVG Canvas / Plot -->
-                  <div class="all-epochs-chart-wrapper" id="all-epochs-chart-wrapper">
-                    <svg id="all-epochs-svg" class="all-epochs-svg" viewBox="0 0 540 135">
-                      <!-- Populated dynamically by renderAllEpochsNdviPlot() -->
-                    </svg>
-
-                    <!-- Floating Tooltip Card (Follows cursor over the plot) -->
-                    <div id="all-epochs-tooltip" class="all-epochs-tooltip" style="display: none;"></div>
-                  </div>
-                </div>
-
-                <div style="font-size: 10px; color: #94a3b8; line-height: 1.3; margin-top: 4px;">
-                  Quantifies land-cover transition by plotting Before (<span style="color:#60a5fa;">T1</span>) vs After (<span style="color:#34d399;">T2</span>) indices over changed pixels:
-                </div>
-
-                <div class="spectral-bars-wrapper">
-                  <!-- NDVI Column (Vegetation) -->
-                  <div class="index-plot-col">
-                    <div class="index-col-header">
-                      <span style="color: #10b981;">🌿 NDVI (Veg)</span>
-                      <span class="index-delta-badge" id="ndvi-delta-badge">--</span>
-                    </div>
-                    <div class="index-col-bars">
-                      <div class="index-bar-row">
-                        <span class="index-bar-label">Before:</span>
-                        <div class="index-bar-track">
-                          <div class="index-bar-fill" id="ndvi-bar-before" style="background: #3b82f6; width: 0%;"></div>
+                    <!-- Multi-Temporal All-Epochs NDVI Trajectory Plot & Multi-Band Inspector -->
+                    <div class="all-epochs-ndvi-section" id="all-epochs-ndvi-section">
+                      <div class="all-epochs-ndvi-header">
+                        <div style="display:flex; align-items:center; gap:6px;">
+                          <span style="font-size:12px;">📈</span>
+                          <span style="font-size:10px; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.05em;">
+                            All Observations NDVI Trajectory
+                          </span>
                         </div>
-                        <span class="index-bar-val" id="ndvi-val-before">--</span>
+                        <span class="tag-badge" id="all-epochs-count-badge" style="font-size:9px; color:#10b981; border-color:rgba(16,185,129,0.4);">
+                          -- Epochs
+                        </span>
                       </div>
-                      <div class="index-bar-row">
-                        <span class="index-bar-label">After:</span>
-                        <div class="index-bar-track">
-                          <div class="index-bar-fill" id="ndvi-bar-after" style="background: #10b981; width: 0%;"></div>
+
+                      <!-- Live Cursor Multi-Band HUD Ribbon (updates on cursor move across timeline) -->
+                      <div class="all-epochs-hover-hud" id="all-epochs-hover-hud">
+                        <div class="hud-item epoch">
+                          <span class="hud-label">EPOCH:</span>
+                          <span class="hud-val" id="hud-epoch-name">Hover Timeline</span>
                         </div>
-                        <span class="index-bar-val" id="ndvi-val-after">--</span>
+                        <div class="hud-item date">
+                          <span class="hud-label">DATE:</span>
+                          <span class="hud-val" id="hud-epoch-date">--</span>
+                        </div>
+                        <div class="hud-item ndvi">
+                          <span class="hud-label">🌿 NDVI:</span>
+                          <span class="hud-val" id="hud-epoch-ndvi" style="color:#10b981;">--</span>
+                        </div>
+                        <div class="hud-item ndwi">
+                          <span class="hud-label">💧 NDWI:</span>
+                          <span class="hud-val" id="hud-epoch-ndwi" style="color:#06b6d4;">--</span>
+                        </div>
+                        <div class="hud-item ndbi">
+                          <span class="hud-label">🏗️ NDBI:</span>
+                          <span class="hud-val" id="hud-epoch-ndbi" style="color:#f59e0b;">--</span>
+                        </div>
+                      </div>
+
+                      <!-- Interactive SVG Canvas / Plot -->
+                      <div class="all-epochs-chart-wrapper" id="all-epochs-chart-wrapper">
+                        <svg id="all-epochs-svg" class="all-epochs-svg" viewBox="0 0 540 135">
+                          <!-- Populated dynamically by renderAllEpochsNdviPlot() -->
+                        </svg>
+
+                        <!-- Floating Tooltip Card (Follows cursor over the plot) -->
+                        <div id="all-epochs-tooltip" class="all-epochs-tooltip" style="display: none;"></div>
                       </div>
                     </div>
-                    <div style="font-size: 8px; color: #64748b;">Range: [-1, +1] &bull; &gt;0.6 Dense Veg</div>
-                  </div>
 
-                  <!-- NDBI Column (Built-up / Urban) -->
-                  <div class="index-plot-col">
-                    <div class="index-col-header">
-                      <span style="color: #f59e0b;">🏗️ NDBI (Urban)</span>
-                      <span class="index-delta-badge" id="ndbi-delta-badge">--</span>
+                    <div style="font-size: 10px; color: #94a3b8; line-height: 1.3; margin-top: 4px;">
+                      Quantifies land-cover transition by plotting Before (<span style="color:#60a5fa;">T1</span>) vs After (<span style="color:#34d399;">T2</span>) indices over changed pixels:
                     </div>
-                    <div class="index-col-bars">
-                      <div class="index-bar-row">
-                        <span class="index-bar-label">Before:</span>
-                        <div class="index-bar-track">
-                          <div class="index-bar-fill" id="ndbi-bar-before" style="background: #3b82f6; width: 0%;"></div>
+
+                    <div class="spectral-bars-wrapper">
+                      <!-- NDVI Column (Vegetation) -->
+                      <div class="index-plot-col">
+                        <div class="index-col-header">
+                          <span style="color: #10b981;">🌿 NDVI (Veg)</span>
+                          <span class="index-delta-badge" id="ndvi-delta-badge">--</span>
                         </div>
-                        <span class="index-bar-val" id="ndbi-val-before">--</span>
+                        <div class="index-col-bars">
+                          <div class="index-bar-row">
+                            <span class="index-bar-label">Before:</span>
+                            <div class="index-bar-track">
+                              <div class="index-bar-fill" id="ndvi-bar-before" style="background: #3b82f6; width: 0%;"></div>
+                            </div>
+                            <span class="index-bar-val" id="ndvi-val-before">--</span>
+                          </div>
+                          <div class="index-bar-row">
+                            <span class="index-bar-label">After:</span>
+                            <div class="index-bar-track">
+                              <div class="index-bar-fill" id="ndvi-bar-after" style="background: #10b981; width: 0%;"></div>
+                            </div>
+                            <span class="index-bar-val" id="ndvi-val-after">--</span>
+                          </div>
+                        </div>
+                        <div style="font-size: 8px; color: #64748b;">Range: [-1, +1] &bull; &gt;0.6 Dense Veg</div>
                       </div>
-                      <div class="index-bar-row">
-                        <span class="index-bar-label">After:</span>
-                        <div class="index-bar-track">
-                          <div class="index-bar-fill" id="ndbi-bar-after" style="background: #f59e0b; width: 0%;"></div>
+
+                      <!-- NDBI Column (Built-up / Urban) -->
+                      <div class="index-plot-col">
+                        <div class="index-col-header">
+                          <span style="color: #f59e0b;">🏗️ NDBI (Urban)</span>
+                          <span class="index-delta-badge" id="ndbi-delta-badge">--</span>
                         </div>
-                        <span class="index-bar-val" id="ndbi-val-after">--</span>
+                        <div class="index-col-bars">
+                          <div class="index-bar-row">
+                            <span class="index-bar-label">Before:</span>
+                            <div class="index-bar-track">
+                              <div class="index-bar-fill" id="ndbi-bar-before" style="background: #3b82f6; width: 0%;"></div>
+                            </div>
+                            <span class="index-bar-val" id="ndbi-val-before">--</span>
+                          </div>
+                          <div class="index-bar-row">
+                            <span class="index-bar-label">After:</span>
+                            <div class="index-bar-track">
+                              <div class="index-bar-fill" id="ndbi-bar-after" style="background: #f59e0b; width: 0%;"></div>
+                            </div>
+                            <span class="index-bar-val" id="ndbi-val-after">--</span>
+                          </div>
+                        </div>
+                        <div style="font-size: 8px; color: #64748b;">Range: [-1, +1] &bull; &gt;0 Built-up Urban</div>
+                      </div>
+
+                      <!-- NDWI Column (Water) -->
+                      <div class="index-plot-col">
+                        <div class="index-col-header">
+                          <span style="color: #06b6d4;">💧 NDWI (Water)</span>
+                          <span class="index-delta-badge" id="ndwi-delta-badge">--</span>
+                        </div>
+                        <div class="index-col-bars">
+                          <div class="index-bar-row">
+                            <span class="index-bar-label">Before:</span>
+                            <div class="index-bar-track">
+                              <div class="index-bar-fill" id="ndwi-bar-before" style="background: #3b82f6; width: 0%;"></div>
+                            </div>
+                            <span class="index-bar-val" id="ndwi-val-before">--</span>
+                          </div>
+                          <div class="index-bar-row">
+                            <span class="index-bar-label">After:</span>
+                            <div class="index-bar-track">
+                              <div class="index-bar-fill" id="ndwi-bar-after" style="background: #06b6d4; width: 0%;"></div>
+                            </div>
+                            <span class="index-bar-val" id="ndwi-val-after">--</span>
+                          </div>
+                        </div>
+                        <div style="font-size: 8px; color: #64748b;">Range: [-1, +1] &bull; &gt;0.3 Open Water</div>
                       </div>
                     </div>
-                    <div style="font-size: 8px; color: #64748b;">Range: [-1, +1] &bull; &gt;0 Built-up Urban</div>
                   </div>
 
-                  <!-- NDWI Column (Water) -->
-                  <div class="index-plot-col">
-                    <div class="index-col-header">
-                      <span style="color: #06b6d4;">💧 NDWI (Water)</span>
-                      <span class="index-delta-badge" id="ndwi-delta-badge">--</span>
+                  <!-- Year-Wise Changes: Tree Workflow & Multi-Band Gallery -->
+                  <div class="breakdown-card" id="yearwise-masks-card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+                      <span style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.05em;">
+                        <span>🛰️</span> Multi-Temporal Change Pipeline Architecture
+                      </span>
+                      <span style="font-size:10px; color:#94a3b8;" id="mask-gallery-count-lbl">-- intervals</span>
                     </div>
-                    <div class="index-col-bars">
-                      <div class="index-bar-row">
-                        <span class="index-bar-label">Before:</span>
-                        <div class="index-bar-track">
-                          <div class="index-bar-fill" id="ndwi-bar-before" style="background: #3b82f6; width: 0%;"></div>
-                        </div>
-                        <span class="index-bar-val" id="ndwi-val-before">--</span>
+
+                    <!-- View Switcher Tabs -->
+                    <div class="tree-view-toggle-bar">
+                      <button class="tree-toggle-btn active" id="btn-toggle-tree-view">
+                        <span>🌳</span> Change Tree Workflow (DAG)
+                      </button>
+                      <button class="tree-toggle-btn" id="btn-toggle-matrix-view">
+                        <span>🗂️</span> Multi-Band Matrix Grid
+                      </button>
+                    </div>
+
+                    <!-- 1. Tree Workflow DAG View (Phase 1 active) -->
+                    <div id="change-tree-container" style="display: block;">
+                      <div style="font-size: 10px; color: #94a3b8; margin-bottom: 12px; line-height: 1.4;">
+                        Hierarchical Directed Graph: Root node contains all $T$ chronological observation epochs. Consecutive pairs branch into input dual-image nodes:
                       </div>
-                      <div class="index-bar-row">
-                        <span class="index-bar-label">After:</span>
-                        <div class="index-bar-track">
-                          <div class="index-bar-fill" id="ndwi-bar-after" style="background: #06b6d4; width: 0%;"></div>
-                        </div>
-                        <span class="index-bar-val" id="ndwi-val-after">--</span>
+                      <div class="tree-workflow-viewport" id="tree-workflow-viewport">
+                        <!-- Dynamically populated by renderChangeTreeView() -->
                       </div>
                     </div>
-                    <div style="font-size: 8px; color: #64748b;">Range: [-1, +1] &bull; &gt;0.3 Open Water</div>
+
+                    <!-- 2. Traditional Multi-Band Matrix View -->
+                    <div id="change-matrix-container" style="display: none;">
+                      <div style="font-size: 10px; color: #94a3b8; margin-bottom: 8px;">
+                        For each consecutive interval: Before RGB, After RGB, Raw ChangeFormer Binary Mask (where), and Semantically Filtered Change Mask (what):
+                      </div>
+                      <div style="display:flex; flex-direction:column; gap:10px;" id="yearwise-masks-container">
+                        <!-- Dynamically populated year-wise mask quad cards -->
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
 
-              <!-- Year-Wise Changes: Tree Workflow & Multi-Band Gallery -->
-              <div class="breakdown-card" id="yearwise-masks-card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
-                  <span style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.05em;">
-                    <span>🛰️</span> Multi-Temporal Change Pipeline Architecture
-                  </span>
-                  <span style="font-size:10px; color:#94a3b8;" id="mask-gallery-count-lbl">-- intervals</span>
-                </div>
+                  <!-- Results Split Row: Transition Breakdown & Detected Polygons side-by-side -->
+                  <div class="results-split-row">
+                    <!-- Land-Cover Transition Breakdown -->
+                    <div class="breakdown-card">
+                      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+                        <span style="font-size:11px; font-weight:700; color:#e2e8f0; text-transform:uppercase; letter-spacing:0.05em;">Transition Breakdown</span>
+                        <span style="font-size:10px; color:#94a3b8;" id="breakdown-total-lbl">100%</span>
+                      </div>
+                      <div class="stacked-bar-container" id="breakdown-stacked-bar">
+                        <!-- Segment bars populated dynamically -->
+                      </div>
+                      <div class="breakdown-legend-pills" id="breakdown-pills-container">
+                        <!-- Pills populated dynamically -->
+                      </div>
+                    </div>
 
-                <!-- View Switcher Tabs -->
-                <div class="tree-view-toggle-bar">
-                  <button class="tree-toggle-btn active" id="btn-toggle-tree-view">
-                    <span>🌳</span> Change Tree Workflow (DAG)
-                  </button>
-                  <button class="tree-toggle-btn" id="btn-toggle-matrix-view">
-                    <span>🗂️</span> Multi-Band Matrix Grid
-                  </button>
-                </div>
+                    <!-- Detected Change Regions List -->
+                    <div class="regions-list-card">
+                      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+                        <span style="font-size:11px; font-weight:700; color:#e2e8f0; text-transform:uppercase; letter-spacing:0.05em;">
+                          <span>📍</span> Detected Change Polygons
+                        </span>
+                        <span style="font-size:10px; color:#38bdf8;" id="regions-count-pill">-- regions</span>
+                      </div>
+                      <div class="regions-scroll-list" id="regions-scroll-list">
+                        <!-- Populated dynamically -->
+                      </div>
+                    </div>
+                  </div><!-- .results-split-row -->
 
-                <!-- 1. Tree Workflow DAG View (Phase 1 active) -->
-                <div id="change-tree-container" style="display: block;">
-                  <div style="font-size: 10px; color: #94a3b8; margin-bottom: 12px; line-height: 1.4;">
-                    Hierarchical Directed Graph: Root node contains all $T$ chronological observation epochs. Consecutive pairs branch into input dual-image nodes:
-                  </div>
-                  <div class="tree-workflow-viewport" id="tree-workflow-viewport">
-                    <!-- Dynamically populated by renderChangeTreeView() -->
-                  </div>
-                </div>
+                </div><!-- #analysis-results-container -->
+              </div><!-- .change-engine-panel -->
+            </div><!-- .drawer-section #section-change-engine -->
+          </div><!-- .drawer-right-col -->
 
-                <!-- 2. Traditional Multi-Band Matrix View -->
-                <div id="change-matrix-container" style="display: none;">
-                  <div style="font-size: 10px; color: #94a3b8; margin-bottom: 8px;">
-                    For each consecutive interval: Before RGB, After RGB, Raw ChangeFormer Binary Mask (where), and Semantically Filtered Change Mask (what):
-                  </div>
-                  <div style="display:flex; flex-direction:column; gap:10px;" id="yearwise-masks-container">
-                    <!-- Dynamically populated year-wise mask quad cards -->
-                  </div>
-                </div>
-              </div>
+        </div><!-- .drawer-workbench-grid -->
 
-              <!-- Land-Cover Transition Breakdown -->
-              <div class="breakdown-card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
-                  <span style="font-size:11px; font-weight:700; color:#e2e8f0; text-transform:uppercase; letter-spacing:0.05em;">Transition Breakdown</span>
-                  <span style="font-size:10px; color:#94a3b8;" id="breakdown-total-lbl">100%</span>
-                </div>
-                <div class="stacked-bar-container" id="breakdown-stacked-bar">
-                  <!-- Segment bars populated dynamically -->
-                </div>
-                <div class="breakdown-legend-pills" id="breakdown-pills-container">
-                  <!-- Pills populated dynamically -->
-                </div>
-              </div>
-
-              <!-- Detected Change Regions List -->
-              <div class="regions-list-card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
-                  <span style="font-size:11px; font-weight:700; color:#e2e8f0; text-transform:uppercase; letter-spacing:0.05em;">
-                    <span>📍</span> Detected Change Polygons
-                  </span>
-                  <span style="font-size:10px; color:#38bdf8;" id="regions-count-pill">-- regions</span>
-                </div>
-                <div class="regions-scroll-list" id="regions-scroll-list">
-                  <!-- Populated dynamically -->
-                </div>
-              </div>
-
-            </div>
-          </div>
-        </div>
-        </div><!-- .drawer-right-col -->
-
-      </div>
+      </div><!-- .drawer-body -->
     </div>
 
     <!-- Floating Change Type Map Legend (Bottom Right) -->
@@ -2791,6 +2822,6 @@
   </div>
 
   <!-- Dedicated Studio Controller -->
-  <script src="/frontend/change.js?v=20260914_ui_v10"></script>
+  <script src="/frontend/change.js?v=20260914_fullscreen_v12"></script>
 </body>
 </html>

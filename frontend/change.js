@@ -90,31 +90,29 @@ function setupLayerToggles(satellite, labels, dark) {
 
 function setupDrawerControls() {
   const closeBtn = document.getElementById("btn-close-drawer");
+  const closeIconBtn = document.getElementById("btn-close-drawer-icon");
   const drawer = document.getElementById("temporal-drawer");
-  if (closeBtn && drawer) {
-    closeBtn.addEventListener("click", () => {
-      drawer.classList.remove("open");
-      if (currentSelectedLayer && gridLayer) {
-        gridLayer.resetStyle(currentSelectedLayer);
-        currentSelectedLayer = null;
-      }
-      const selectedSiteContainer = document.getElementById("hud-selected-container");
-      if (selectedSiteContainer) selectedSiteContainer.style.display = "none";
-    });
-  }
 
-  // Studio Workbench Fullscreen / Side-Panel Toggle
+  const closeDrawer = () => {
+    if (drawer) drawer.classList.remove("open");
+    if (currentSelectedLayer && gridLayer) {
+      gridLayer.resetStyle(currentSelectedLayer);
+      currentSelectedLayer = null;
+    }
+    const selectedSiteContainer = document.getElementById("hud-selected-container");
+    if (selectedSiteContainer) selectedSiteContainer.style.display = "none";
+    if (changeMap) changeMap.invalidateSize();
+  };
+
+  if (closeBtn) closeBtn.addEventListener("click", closeDrawer);
+  if (closeIconBtn) closeIconBtn.addEventListener("click", closeDrawer);
+
+  // Studio Workbench Fullscreen / Side-Panel Toggle (Optional fallback)
   const expandBtn = document.getElementById("btn-expand-drawer");
   if (expandBtn && drawer) {
     expandBtn.addEventListener("click", () => {
       drawer.classList.toggle("full-mode");
-      const isFull = drawer.classList.contains("full-mode");
-      const icon = document.getElementById("expand-icon");
-      const text = document.getElementById("expand-text");
-      if (icon) icon.textContent = isFull ? "🗗" : "⤢";
-      if (text) text.textContent = isFull ? "Dock to Side" : "Expand Studio";
       if (changeMap) changeMap.invalidateSize();
-      // Re-calculate NDVI trajectory plot after layout animation
       setTimeout(() => {
         if (currentSiteTimeline) {
           renderAllEpochsNdviPlot(currentSiteTimeline.multi_temporal_stack, currentAnalysisData?.pairwise_transitions);
@@ -325,11 +323,6 @@ async function openMultiTemporalDrawer(siteKey) {
   const bridgeEpochCount = document.getElementById("bridge-epoch-count");
 
   drawer.classList.add("open");
-  drawer.classList.remove("full-mode");
-  const icon = document.getElementById("expand-icon");
-  const text = document.getElementById("expand-text");
-  if (icon) icon.textContent = "⤢";
-  if (text) text.textContent = "Expand Studio";
   if (siteKeyEl) siteKeyEl.textContent = siteKey;
   if (siteTitleEl) siteTitleEl.textContent = "Loading Multi-Temporal Series...";
   if (stackContainer) stackContainer.innerHTML = '<span style="color:#64748b; font-size:11px; padding:10px;">Loading epoch stack...</span>';
@@ -354,6 +347,9 @@ async function openMultiTemporalDrawer(siteKey) {
     // 1. Render Multi-Temporal Observation Stack (Filmstrip Cards)
     renderMultiTemporalStack(stack);
     renderAllEpochsNdviPlot(stack, null);
+    setTimeout(() => {
+      renderAllEpochsNdviPlot(stack, null);
+    }, 100);
 
     // 2. Render Step-Wise Sequential Transitions (T1 -> T2, T2 -> T3 ...)
     renderSequentialTransitions(transitions);
