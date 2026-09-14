@@ -154,9 +154,9 @@ def lookup_change_type(before_class: str, after_class: str, area_m2: float = 0.0
         return "No Change"
 
     # 3. Water Variation (confirmed by spectral thresholds)
-    if before_class == CLASS_WATER and (is_soil_a or is_built_a or is_conf_a):
+    if before_class == CLASS_WATER and after_class != CLASS_WATER:
         return TYPE_WATER_SHRINKAGE
-    if (is_soil_b or is_built_b or is_conf_b or before_class in VEGETATION_CLASSES) and after_class == CLASS_WATER:
+    if before_class != CLASS_WATER and after_class == CLASS_WATER:
         return TYPE_WATER_EXPANSION
 
     # 4. Demolition: Built-up -> Bare Soil ONLY (site excavation/rubble)
@@ -207,9 +207,9 @@ def vectorized_change_type_lookup(
     # 2. Clearance: Dense Vegetation -> Bare Soil / Confusion (deforestation/clearing)
     output[is_dense_before & (is_bare_after | is_conf_after)] = TYPE_CLEARANCE
 
-    # 3. Water Variation
-    output[is_water_before & (is_bare_after | is_built_after | is_conf_after)] = TYPE_WATER_SHRINKAGE
-    output[(is_bare_before | is_built_before | is_conf_before | is_veg_before) & is_water_after] = TYPE_WATER_EXPANSION
+    # 3. Water Variation: covers all cases where water appears or recedes
+    output[is_water_before & (~is_water_after)] = TYPE_WATER_SHRINKAGE
+    output[(~is_water_before) & is_water_after] = TYPE_WATER_EXPANSION
 
     # 4. Demolition: Built-up -> Bare Soil ONLY (rubble/excavation)
     output[is_built_before & is_bare_after] = TYPE_DEMOLITION

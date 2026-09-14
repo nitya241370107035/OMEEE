@@ -332,6 +332,49 @@ function getSpectralTransition(cB, cA) {
   return `${cB} → ${cA}`;
 }
 
+function getFullWaterShrinkageBox(pair) {
+  if (!pair || !pair.water_extent_stats?.is_shrinkage_proven) return null;
+  const grid = pair.cursor_sample_grid;
+  const sz = grid?.grid_size || grid?.before?.class?.length || 0;
+  if (sz <= 0 || !grid.before?.class || !grid.after?.class) return null;
+
+  let rMin = sz, rMax = -1, cMin = sz, cMax = -1, driedCount = 0;
+  for (let r = 0; r < sz; r++) {
+    for (let c = 0; c < sz; c++) {
+      const bC = (grid.before.class[r]?.[c] || "").toLowerCase();
+      const aC = (grid.after.class[r]?.[c] || "").toLowerCase();
+      if (bC.includes("water") && !aC.includes("water")) {
+        driedCount++;
+        if (r < rMin) rMin = r;
+        if (r > rMax) rMax = r;
+        if (c < cMin) cMin = c;
+        if (c > cMax) cMax = c;
+      }
+    }
+  }
+
+  if (driedCount >= 3 && rMax >= rMin && cMax >= cMin) {
+    const deltaPx = Math.abs(pair.water_extent_stats.delta_pixels || (driedCount * (512 / sz) * (512 / sz)));
+    const areaM2 = deltaPx * 100;
+    return formatBoxItem({
+      id: 1,
+      change_type: "Water-Extent Variation (shrinkage)",
+      transition_label: "Water → Land (Shrinkage)",
+      before_class: "Water",
+      after_class: "Land",
+      area_m2: areaM2,
+      box_pct: {
+        x: Math.max(0, Math.round((cMin / sz) * 1000) / 10),
+        y: Math.max(0, Math.round((rMin / sz) * 1000) / 10),
+        w: Math.min(100, Math.round(Math.max(6, ((cMax - cMin + 1) / sz) * 100) * 10) / 10),
+        h: Math.min(100, Math.round(Math.max(6, ((rMax - rMin + 1) / sz) * 100) * 10) / 10),
+      },
+      proof: pair.water_extent_stats.proof
+    });
+  }
+  return null;
+}
+
 function getMajorChangeBoxes(pair) {
   if (!pair) return [];
   if (pair.change_boxes && pair.change_boxes.length > 0) {
@@ -377,8 +420,14 @@ function getMajorChangeBoxes(pair) {
         return true;
       })
       .map(b => formatBoxItem(b))
-      .sort((a, b) => (b.area_m2 || 0) - (a.area_m2 || 0))
-      .slice(0, 8);
+      .sort((a, b) => (b.area_m2 || 0) - (a.area_m2 || 0));
+
+    const fullShrink = getFullWaterShrinkageBox(pair);
+    if (fullShrink) {
+      const nonWater = pair.change_boxes.filter(b => !(b.change_type || "").toLowerCase().includes("water") && !(b.transition_label || "").toLowerCase().includes("water"));
+      return [fullShrink, ...nonWater].slice(0, 8);
+    }
+    return pair.change_boxes.slice(0, 8);
   }
 
   const features = pair.change_geojson?.features || [];
@@ -585,6 +634,13 @@ function getMajorChangeBoxes(pair) {
         proof: pair.water_extent_stats.proof
       }));
     }
+  }
+
+  // 4. Water shrinkage full envelope check
+  const fullShrink = getFullWaterShrinkageBox(pair);
+  if (fullShrink) {
+    const nonWater = boxes.filter(b => !(b.change_type || "").toLowerCase().includes("water") && !(b.transition_label || "").toLowerCase().includes("water"));
+    boxes = [fullShrink, ...nonWater];
   }
 
   return boxes.slice(0, 8);

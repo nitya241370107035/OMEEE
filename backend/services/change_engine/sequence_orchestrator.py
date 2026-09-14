@@ -788,6 +788,37 @@ class SequenceOrchestrator:
                 change_boxes.insert(0, water_box)
                 change_boxes = change_boxes[:8]
 
+        # If water shrinkage is proven, ensure the consolidated box covers the FULL lake/water extent that dried up
+        if is_water_shrinkage_proven:
+            dried_mask = water_mask_b & (~water_mask_a)
+            full_dried_count = int(np.sum(dried_mask))
+            if full_dried_count >= MIN_WATER_PROOF_PX:
+                r_indices, c_indices = np.where(dried_mask)
+                r_min, r_max = int(np.min(r_indices)), int(np.max(r_indices))
+                c_min, c_max = int(np.min(c_indices)), int(np.max(c_indices))
+                bw = max(6, c_max - c_min)
+                bh = max(6, r_max - r_min)
+                full_shrinkage_box = {
+                    "id": 1,
+                    "change_type": TYPE_WATER_SHRINKAGE,
+                    "transition_label": "Water → Land (Shrinkage)",
+                    "before_class": "Water",
+                    "after_class": "Land",
+                    "area_m2": round(float(full_dried_count * 100.0), 1),
+                    "box_pct": {
+                        "x": round((c_min / w) * 100.0, 2),
+                        "y": round((r_min / h) * 100.0, 2),
+                        "w": round(min(100.0 - (c_min / w) * 100.0, (bw / w) * 100.0), 2),
+                        "h": round(min(100.0 - (r_min / h) * 100.0, (bh / h) * 100.0), 2),
+                    },
+                    "pixel_bbox": [c_min, r_min, c_max, r_max],
+                    "proof": water_proof_text,
+                }
+                # Replace fragmented small water boxes with the full water shrinkage envelope
+                non_water_boxes = [b for b in change_boxes if "water" not in b.get("change_type", "").lower()]
+                change_boxes = [full_shrinkage_box] + non_water_boxes
+                change_boxes = change_boxes[:8]
+
         # Per-pixel colorized land-cover maps for Before and After
         classified_b_png = classified_map_to_png_base64(class_before_map, mask=surviving_mask)
         classified_a_png = classified_map_to_png_base64(class_after_map, mask=surviving_mask)
