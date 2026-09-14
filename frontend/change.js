@@ -480,19 +480,24 @@ function getMajorChangeBoxes(pair) {
     }).map(b => formatBoxItem(b))
       .sort((a, b) => (b.area_m2 || 0) - (a.area_m2 || 0));
 
-    // Overlay full-extent water envelopes computed from the cursor sample grid
-    // (replaces any fragmented/small water boxes from the backend)
-    const fullShrink = getFullWaterShrinkageBox(pair);
-    const fullExtend = getFullWaterExtensionBox(pair);
-    if (fullShrink || fullExtend) {
-      const nonWater = filtered.filter(b =>
-        !(b.change_type || "").toLowerCase().includes("water") &&
-        !(b.transition_label || "").toLowerCase().includes("water")
-      );
-      const waterBoxes = [fullShrink, fullExtend].filter(Boolean);
-      const result = [...waterBoxes, ...nonWater].slice(0, 8);
-      pair._cachedChangeBoxes = result;
-      return result;
+    // Grid-computed water envelopes are a LAST RESORT only:
+    // The backend polygonize_change_mask() already produces accurate per-polygon
+    // box_pct bounds. We should only fall back to the grid scan if the backend
+    // produced zero water-related boxes (e.g. the water event was below area_m2 threshold).
+    const hasBackendWaterBox = filtered.some(b =>
+      (b.change_type || "").toLowerCase().includes("water") ||
+      (b.transition_label || "").toLowerCase().includes("water")
+    );
+
+    if (!hasBackendWaterBox) {
+      const fullShrink = getFullWaterShrinkageBox(pair);
+      const fullExtend = getFullWaterExtensionBox(pair);
+      if (fullShrink || fullExtend) {
+        const waterBoxes = [fullShrink, fullExtend].filter(Boolean);
+        const result = [...waterBoxes, ...filtered].slice(0, 8);
+        pair._cachedChangeBoxes = result;
+        return result;
+      }
     }
 
     pair._cachedChangeBoxes = filtered.slice(0, 8);
