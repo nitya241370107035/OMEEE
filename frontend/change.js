@@ -375,8 +375,74 @@ function getFullWaterShrinkageBox(pair) {
   return null;
 }
 
+/**
+ * Mirrors getFullWaterShrinkageBox but for extension events.
+ * Scans the cursor sample grid for pixels that were NOT water before
+ * but ARE water after, computing the actual bounding envelope.
+ * Falls back to a proportional box if the grid has no class data.
+ */
+function getFullWaterExtensionBox(pair) {
+  if (!pair || !pair.water_extent_stats?.is_extension_proven) return null;
+  const grid = pair.cursor_sample_grid;
+  const sz = grid?.grid_size || grid?.before?.class?.length || 0;
+
+  // Attempt pixel-level envelope computation from sample grid
+  if (sz > 0 && grid.before?.class && grid.after?.class) {
+    let rMin = sz, rMax = -1, cMin = sz, cMax = -1, newWaterCount = 0;
+    for (let r = 0; r < sz; r++) {
+      for (let c = 0; c < sz; c++) {
+        const bC = (grid.before.class[r]?.[c] || "").toLowerCase();
+        const aC = (grid.after.class[r]?.[c] || "").toLowerCase();
+        if (!bC.includes("water") && aC.includes("water")) {
+          newWaterCount++;
+          if (r < rMin) rMin = r;
+          if (r > rMax) rMax = r;
+          if (c < cMin) cMin = c;
+          if (c > cMax) cMax = c;
+        }
+      }
+    }
+    if (newWaterCount >= 3 && rMax >= rMin && cMax >= cMin) {
+      const deltaPx = Math.abs(pair.water_extent_stats.delta_pixels || (newWaterCount * (512 / sz) * (512 / sz)));
+      return formatBoxItem({
+        id: 1,
+        change_type: "Water-Extent Variation (expansion)",
+        transition_label: "Land \u2192 Water (Extension)",
+        before_class: "Land",
+        after_class: "Water",
+        area_m2: deltaPx * 100,
+        box_pct: {
+          x: Math.max(0, Math.round((cMin / sz) * 1000) / 10),
+          y: Math.max(0, Math.round((rMin / sz) * 1000) / 10),
+          w: Math.min(100, Math.round(Math.max(6, ((cMax - cMin + 1) / sz) * 100) * 10) / 10),
+          h: Math.min(100, Math.round(Math.max(6, ((rMax - rMin + 1) / sz) * 100) * 10) / 10),
+        },
+        proof: pair.water_extent_stats.proof
+      });
+    }
+  }
+
+  // Fallback: proportional placeholder (better than hardcoded 30/30/25/25)
+  const deltaPx = pair.water_extent_stats.delta_pixels || 25;
+  const pct = Math.min(60, Math.max(10, Math.sqrt(deltaPx) * 1.5));
+  const offset = Math.max(5, (100 - pct) / 2);
+  return formatBoxItem({
+    id: 1,
+    change_type: "Water-Extent Variation (expansion)",
+    transition_label: "Land \u2192 Water (Extension)",
+    before_class: "Land",
+    after_class: "Water",
+    area_m2: deltaPx * 100,
+    box_pct: { x: offset, y: offset, w: pct, h: pct },
+    proof: pair.water_extent_stats.proof
+  });
+}
+
 function getMajorChangeBoxes(pair) {
   if (!pair) return [];
+
+  // Cache result on the pair object — avoids expensive recomputation on every mousemove
+  if (pair._cachedChangeBoxes !== undefined) return pair._cachedChangeBoxes;
 
   // --- PRIMARY PATH: backend-computed change_boxes ---
   if (pair.change_boxes && pair.change_boxes.length > 0) {
@@ -414,18 +480,23 @@ function getMajorChangeBoxes(pair) {
     }).map(b => formatBoxItem(b))
       .sort((a, b) => (b.area_m2 || 0) - (a.area_m2 || 0));
 
-    // Overlay the full-extent water-shrinkage envelope computed from the cursor grid
-    // (this replaces any fragmented/small water boxes from the backend)
+    // Overlay full-extent water envelopes computed from the cursor sample grid
+    // (replaces any fragmented/small water boxes from the backend)
     const fullShrink = getFullWaterShrinkageBox(pair);
-    if (fullShrink) {
+    const fullExtend = getFullWaterExtensionBox(pair);
+    if (fullShrink || fullExtend) {
       const nonWater = filtered.filter(b =>
         !(b.change_type || "").toLowerCase().includes("water") &&
         !(b.transition_label || "").toLowerCase().includes("water")
       );
-      return [fullShrink, ...nonWater].slice(0, 8);
+      const waterBoxes = [fullShrink, fullExtend].filter(Boolean);
+      const result = [...waterBoxes, ...nonWater].slice(0, 8);
+      pair._cachedChangeBoxes = result;
+      return result;
     }
 
-    return filtered.slice(0, 8);
+    pair._cachedChangeBoxes = filtered.slice(0, 8);
+    return pair._cachedChangeBoxes;
   }
 
   // --- FALLBACK PATH: derive from change_geojson features ---
@@ -618,34 +689,30 @@ function getMajorChangeBoxes(pair) {
     }
   }
 
-  // 3. Water extension proof check
+  // 3. Water extension: compute real envelope from sample grid (no hardcoded placeholder)
   if (pair.water_extent_stats?.is_extension_proven) {
     const hasWaterBox = boxes.some(b => (b.transition_label || "").includes("Water"));
     if (!hasWaterBox) {
-      boxes.unshift(formatBoxItem({
-        id: 999,
-        change_type: "Water Extension",
-        transition_label: "Land → Water (Extension)",
-        before_class: "Land",
-        after_class: "Water",
-        area_m2: (pair.water_extent_stats.delta_pixels || 25) * 100,
-        box_pct: { x: 30, y: 30, w: 25, h: 25 },
-        proof: pair.water_extent_stats.proof
-      }));
+      const fullExtend = getFullWaterExtensionBox(pair);
+      if (fullExtend) boxes.unshift(fullExtend);
     }
   }
 
-  // 4. Water shrinkage full envelope check (always replaces fragmented water boxes)
+  // 4. Water shrinkage & extension: replace fragmented water boxes with full-extent envelopes
   const fullShrink = getFullWaterShrinkageBox(pair);
-  if (fullShrink) {
+  const fullExtend = getFullWaterExtensionBox(pair);
+  if (fullShrink || fullExtend) {
     const nonWater = boxes.filter(b =>
       !(b.change_type || "").toLowerCase().includes("water") &&
       !(b.transition_label || "").toLowerCase().includes("water")
     );
-    boxes = [fullShrink, ...nonWater];
+    const waterBoxes = [fullShrink, fullExtend].filter(Boolean);
+    boxes = [...waterBoxes, ...nonWater];
   }
 
-  return boxes.slice(0, 8);
+  const result = boxes.slice(0, 8);
+  pair._cachedChangeBoxes = result;
+  return result;
 }
 
 function renderChangeSquaresHtml(boxes) {
@@ -1999,16 +2066,8 @@ function getStandardClassInfo(ndvi, ndwi, ndbi) {
   return getClassColorInfo(cls);
 }
 
-function indexToPercent(val) {
-  if (val == null || isNaN(val)) return "50%";
-  const clamped = Math.max(-1, Math.min(1, Number(val)));
-  return `${Math.round(((clamped + 1) / 2) * 100)}%`;
-}
-
-function fmtVal(val) {
-  if (val == null || isNaN(val)) return "--";
-  return (val >= 0 ? "+" : "") + Number(val).toFixed(2);
-}
+// indexToPercent and fmtVal are defined at the top of this file (lines 10–20)
+// Duplicates removed — do not re-declare here.
 
 /**
  * Evaluates the dominant surface classifications ONLY inside the region
