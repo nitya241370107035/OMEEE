@@ -163,14 +163,169 @@ function setupLightboxControls() {
   }
 }
 
-window.openLightbox = function(url, title = "Band Map Inspection") {
+function formatBoxItem(b) {
+  const type = b.change_type || "Construction";
+  let color = "#f59e0b";
+  let fillColor = "rgba(245, 158, 11, 0.22)";
+  let shortType = "Build";
+
+  if (type.includes("Road")) {
+    color = "#a855f7";
+    fillColor = "rgba(168, 85, 247, 0.22)";
+    shortType = "Road";
+  } else if (type.includes("Clearance")) {
+    color = "#f43f5e";
+    fillColor = "rgba(244, 63, 94, 0.22)";
+    shortType = "Clear";
+  } else if (type.includes("Water")) {
+    color = "#06b6d4";
+    fillColor = "rgba(6, 182, 212, 0.22)";
+    shortType = "Water";
+  } else if (type.includes("Demolition")) {
+    color = "#fb923c";
+    fillColor = "rgba(251, 146, 60, 0.22)";
+    shortType = "Demo";
+  } else if (type.includes("Construction")) {
+    color = "#f59e0b";
+    fillColor = "rgba(245, 158, 11, 0.22)";
+    shortType = "Build";
+  }
+
+  const box = b.box_pct || { x: 10, y: 10, w: 20, h: 20 };
+  return {
+    ...b,
+    color,
+    fillColor,
+    shortType,
+    box_pct: box,
+    area_m2: b.area_m2 || 0
+  };
+}
+
+function getMajorChangeBoxes(pair) {
+  if (!pair) return [];
+  if (pair.change_boxes && pair.change_boxes.length > 0) {
+    return pair.change_boxes.map(b => formatBoxItem(b));
+  }
+  const features = pair.change_geojson?.features || [];
+  const majorTypes = [
+    "Construction",
+    "Road Development",
+    "Clearance",
+    "Water-Extent Variation (shrinkage)",
+    "Water-Extent Variation (expansion)",
+    "Demolition / Reversion"
+  ];
+  const boxes = [];
+  features.forEach((f, idx) => {
+    const p = f.properties || {};
+    const type = p.change_type;
+    if (!majorTypes.includes(type)) return;
+    
+    let boxPct = p.box_pct;
+    if (boxPct) {
+      boxes.push(formatBoxItem({
+        id: idx + 1,
+        change_type: type,
+        area_m2: p.area_sq_m || p.area_m2 || 0,
+        box_pct: boxPct
+      }));
+    }
+  });
+  return boxes;
+}
+
+function renderChangeSquaresHtml(boxes) {
+  if (!boxes || boxes.length === 0) return "";
+  return `
+    <div class="change-squares-layer" style="position:absolute; inset:0; pointer-events:none; z-index:12;">
+      ${boxes.map(b => `
+        <div class="change-square-box" style="
+          position: absolute;
+          left: ${b.box_pct.x}%;
+          top: ${b.box_pct.y}%;
+          width: ${Math.max(3, b.box_pct.w)}%;
+          height: ${Math.max(3, b.box_pct.h)}%;
+          border: 2px solid ${b.color};
+          background: ${b.fillColor};
+          box-shadow: 0 0 10px ${b.color};
+          box-sizing: border-box;
+          pointer-events: auto;
+          cursor: pointer;
+        " title="${b.change_type} (${Math.round(b.area_m2)} m²)">
+          <span class="change-square-tag" style="
+            position: absolute;
+            bottom: 100%;
+            left: -1px;
+            background: ${b.color};
+            color: #030712;
+            font-weight: 800;
+            font-size: 8px;
+            line-height: 1;
+            padding: 2px 4px;
+            border-radius: 2px 2px 0 0;
+            white-space: nowrap;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+          ">${b.shortType}</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+window.openLightbox = function(url, title = "Band Map Inspection", boxes = null) {
   if (!url) return;
   const modal = document.getElementById("change-lightbox-modal");
   const img = document.getElementById("lightbox-img");
   const titleEl = document.getElementById("lightbox-title");
+  const wrapper = document.getElementById("lightbox-img-wrapper");
+  
   if (modal && img) {
     img.src = url;
     if (titleEl) titleEl.textContent = title;
+    
+    // Remove old overlay if present
+    const oldOverlay = document.getElementById("lightbox-squares-overlay");
+    if (oldOverlay) oldOverlay.remove();
+    
+    if (boxes && boxes.length > 0 && wrapper) {
+      const overlay = document.createElement("div");
+      overlay.id = "lightbox-squares-overlay";
+      overlay.className = "change-squares-layer";
+      overlay.style.cssText = "position:absolute; inset:0; pointer-events:none; z-index:15;";
+      overlay.innerHTML = boxes.map(b => `
+        <div class="change-square-box" style="
+          position: absolute;
+          left: ${b.box_pct.x}%;
+          top: ${b.box_pct.y}%;
+          width: ${Math.max(3, b.box_pct.w)}%;
+          height: ${Math.max(3, b.box_pct.h)}%;
+          border: 2.5px solid ${b.color};
+          background: ${b.fillColor};
+          box-shadow: 0 0 14px ${b.color};
+          box-sizing: border-box;
+          pointer-events: auto;
+        " title="${b.change_type} (${Math.round(b.area_m2)} m²)">
+          <span class="change-square-tag" style="
+            position: absolute;
+            bottom: 100%;
+            left: -1px;
+            background: ${b.color};
+            color: #030712;
+            font-weight: 800;
+            font-size: 10px;
+            line-height: 1;
+            padding: 3px 6px;
+            border-radius: 3px 3px 0 0;
+            white-space: nowrap;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+          ">${b.shortType}</span>
+        </div>
+      `).join("");
+      wrapper.appendChild(overlay);
+    }
     modal.style.display = "flex";
   }
 };
@@ -1896,7 +2051,10 @@ function renderChangeTreeView(timeline, analysisData) {
             <span style="font-size:10px; font-weight:800; color:#34d399;">T${pIdx + 2} (After)</span>
             <span style="font-size:8px; color:#94a3b8;">${pair.date_after}</span>
           </div>
-          <img src="${rgbA}" alt="After T${pIdx + 2}" class="tree-image-preview" title="Click to enlarge After RGB" />
+          <div style="position:relative; width:100%; border-radius:4px; overflow:hidden;">
+            <img src="${rgbA}" alt="After T${pIdx + 2}" class="tree-image-preview" style="display:block; width:100%;" title="Click to enlarge After RGB" />
+            ${renderChangeSquaresHtml(getMajorChangeBoxes(pair))}
+          </div>
           <div style="font-size:8px; color:#94a3b8; display:flex; justify-content:space-between;">
             <span>NDVI: <b style="color:#10b981;">${pair.spectral_profile?.after?.ndvi?.toFixed(2) ?? '--'}</b></span>
             <span>NDBI: <b style="color:#f59e0b;">${pair.spectral_profile?.after?.ndbi?.toFixed(2) ?? '--'}</b></span>
@@ -1904,6 +2062,8 @@ function renderChangeTreeView(timeline, analysisData) {
         </div>
       </div>
     `;
+
+    const pairChangeBoxes = getMajorChangeBoxes(pair);
 
     // Hook up click to enlarge and live cursor hover
     const imgB = pairCard.querySelector(".tree-image-box.before img");
@@ -1917,7 +2077,7 @@ function renderChangeTreeView(timeline, analysisData) {
     if (imgA) {
       attachPlotSpectralHover(imgA, pair, pIdx);
       if (rgbA) {
-        imgA.onclick = () => openLightbox(rgbA, `Pair ${pIdx + 1} After RGB (${pair.date_after})`);
+        imgA.onclick = () => openLightbox(rgbA, `Pair ${pIdx + 1} After RGB (${pair.date_after})`, pairChangeBoxes);
       }
     }
 
@@ -2504,6 +2664,9 @@ function renderYearwiseMaskGallery(pairwise) {
     pFeatures.forEach(f => pairAreaM2 += (f.properties?.area_sq_m || f.properties?.area_m2 || 0));
     const pairAreaStr = pairAreaM2 >= 10000 ? `${(pairAreaM2 / 10000).toFixed(2)} ha` : `${Math.round(pairAreaM2).toLocaleString()} m²`;
 
+    const changeBoxes = getMajorChangeBoxes(pair);
+    const squaresHtml = renderChangeSquaresHtml(changeBoxes);
+
     card.innerHTML = `
       <div class="mask-pair-header">
         <div style="display:flex; align-items:center; gap:10px;">
@@ -2513,6 +2676,9 @@ function renderYearwiseMaskGallery(pairwise) {
           </span>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
+          <button class="hud-btn btn-toggle-squares active" style="padding:4px 10px; font-size:11px; background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); color:#fbbf24;" title="Toggle Major Change Bounding Squares on After Images">
+            🔲 Major Changes (${changeBoxes.length})
+          </button>
           <button class="hud-btn btn-theater-toggle" style="padding:4px 10px; font-size:11px; background:rgba(6,182,212,0.15); border:1px solid rgba(6,182,212,0.4); color:#38bdf8;" title="Maximize this pair to full screen theater mode">
             ⤢ Fullscreen Pair
           </button>
@@ -2560,11 +2726,12 @@ function renderYearwiseMaskGallery(pairwise) {
           <span class="mask-box-label">Before RGB (${pair.date_before})</span>
         </div>
 
-        <!-- 2. After RGB -->
-        <div class="mask-box" onclick="openLightbox('${rgbA}', 'After RGB (${pair.date_after})')">
-          <span class="mask-box-badge rgb">T2 RGB</span>
+        <!-- 2. After RGB (Annotated with Major Change Squares) -->
+        <div class="mask-box mask-box-after-rgb">
+          <span class="mask-box-badge rgb" style="background:#f59e0b; color:#030712;">T2 RGB</span>
           <div class="mask-img-wrap" title="Click to enlarge After RGB (${pair.date_after})">
             ${rgbA ? `<img src="${rgbA}" alt="After RGB" loading="eager" />` : `<span style="font-size:10px; color:#94a3b8;">No RGB</span>`}
+            ${squaresHtml}
             <div class="sync-crosshair"></div>
           </div>
           <span class="mask-box-label">After RGB (${pair.date_after})</span>
@@ -2580,11 +2747,12 @@ function renderYearwiseMaskGallery(pairwise) {
           <span class="mask-box-label" style="color:#6ee7b7;">Before NDVI (${pair.date_before})</span>
         </div>
 
-        <!-- 4. After NDVI Band Map -->
-        <div class="mask-box" onclick="openLightbox('${ndviA}', 'After NDVI Band Map (${pair.date_after})')">
-          <span class="mask-box-badge ndvi">T2 NDVI</span>
+        <!-- 4. After NDVI Band Map (Annotated with Major Change Squares) -->
+        <div class="mask-box mask-box-after-ndvi">
+          <span class="mask-box-badge ndvi" style="background:#f59e0b; color:#030712;">T2 NDVI</span>
           <div class="mask-img-wrap" title="Click to enlarge After NDVI Band Map (${pair.date_after})">
             ${ndviA ? `<img src="${ndviA}" alt="After NDVI" loading="eager" />` : `<span style="font-size:10px; color:#94a3b8;">NDVI Map</span>`}
+            ${squaresHtml}
             <div class="sync-crosshair"></div>
           </div>
           <span class="mask-box-label" style="color:#6ee7b7;">After NDVI (${pair.date_after})</span>
@@ -2636,6 +2804,39 @@ function renderYearwiseMaskGallery(pairwise) {
         </div>
       </div>
     `;
+
+    // After RGB and After NDVI open lightbox with change boxes
+    const afterRgbBox = card.querySelector(".mask-box-after-rgb");
+    if (afterRgbBox && rgbA) {
+      afterRgbBox.onclick = (e) => {
+        if (e.target.closest(".change-square-box")) return;
+        openLightbox(rgbA, `After RGB (${pair.date_after})`, changeBoxes);
+      };
+    }
+    const afterNdviBox = card.querySelector(".mask-box-after-ndvi");
+    if (afterNdviBox && ndviA) {
+      afterNdviBox.onclick = (e) => {
+        if (e.target.closest(".change-square-box")) return;
+        openLightbox(ndviA, `After NDVI (${pair.date_after})`, changeBoxes);
+      };
+    }
+
+    // Toggle squares button handler
+    const toggleBtn = card.querySelector(".btn-toggle-squares");
+    if (toggleBtn) {
+      toggleBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const layers = card.querySelectorAll(".change-squares-layer");
+        let isHidden = false;
+        layers.forEach(l => {
+          l.classList.toggle("hidden");
+          isHidden = l.classList.contains("hidden");
+        });
+        toggleBtn.classList.toggle("active", !isHidden);
+        toggleBtn.textContent = isHidden ? `🔲 Show Squares (${changeBoxes.length})` : `🔲 Major Changes (${changeBoxes.length})`;
+        toggleBtn.style.color = isHidden ? "#94a3b8" : "#fbbf24";
+      });
+    }
 
     // Theater Mode toggle handler
     const theaterBtn = card.querySelector(".btn-theater-toggle");

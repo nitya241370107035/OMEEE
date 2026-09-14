@@ -14,6 +14,7 @@ from backend.services.change_engine.change_type_rules import (
     refine_road_morphology,
     TYPE_CONSTRUCTION,
     TYPE_ROAD_DEVELOPMENT,
+    MAJOR_CHANGE_TYPES,
 )
 
 
@@ -30,17 +31,8 @@ def polygonize_change_mask(
 ) -> List[Dict[str, Any]]:
     """Polygonizes a binary or integer labeled change mask into GeoJSON features.
 
-    Args:
-        mask: 2D uint8 or bool array (H, W) where >0 indicates change
-        geotransform: Affine transform mapping pixel (col, row) to (lon, lat)
-        change_type_map: Optional (H, W) array of change type strings
-        before_class_map: Optional (H, W) array of before class strings
-        after_class_map: Optional (H, W) array of after class strings
-        min_area_px: Minimum pixel count required to keep a polygon
-        simplify_tolerance: Shapely simplification tolerance in degrees
-
-    Returns:
-        List of GeoJSON Feature dicts with geometry and properties.
+    Restricted strictly to major changes (Construction, Road Dev, Clearance, Demolition, Water variation).
+    Includes pixel bounding boxes (squares) for direct visualization on After images.
     """
     binary_mask = (mask > 0).astype(np.uint8)
     if not np.any(binary_mask):
@@ -92,18 +84,33 @@ def polygonize_change_mask(
             if after_class_map is not None:
                 after_class = str(after_class_map[c_row, c_col])
 
+        # Compute pixel coordinates bounding box for the change square
+        min_c = int(np.clip((bounds[0] - geotransform.c) / geotransform.a, 0, mask.shape[1] - 1))
+        max_c = int(np.clip((bounds[2] - geotransform.c) / geotransform.a, 0, mask.shape[1] - 1))
+        min_r = int(np.clip((bounds[3] - geotransform.f) / geotransform.e, 0, mask.shape[0] - 1))
+        max_r = int(np.clip((bounds[1] - geotransform.f) / geotransform.e, 0, mask.shape[0] - 1))
+        c_min, c_max = min(min_c, max_c), max(min_c, max_c)
+        r_min, r_max = min(min_r, max_r), max(min_r, max_r)
+
         # Morphology check for Road Development if construction-like
         if change_type in (TYPE_CONSTRUCTION, "Built-up / Urban"):
-            # Crop local component for morphology test
-            min_c = int(np.clip((bounds[0] - geotransform.c) / geotransform.a, 0, mask.shape[1] - 1))
-            max_c = int(np.clip((bounds[2] - geotransform.c) / geotransform.a, 0, mask.shape[1] - 1))
-            min_r = int(np.clip((bounds[3] - geotransform.f) / geotransform.e, 0, mask.shape[0] - 1))
-            max_r = int(np.clip((bounds[1] - geotransform.f) / geotransform.e, 0, mask.shape[0] - 1))
-            r_start, r_end = min(min_r, max_r), max(min_r, max_r) + 1
-            c_start, c_end = min(min_c, max_c), max(min_c, max_c) + 1
-
+            r_start, r_end = r_min, r_max + 1
+            c_start, c_end = c_min, c_max + 1
             sub_mask = binary_mask[r_start:r_end, c_start:c_end]
             change_type = refine_road_morphology(sub_mask, current_type=change_type)
+
+        # USER RULE: Only major structural / anthropogenic changes are marked
+        if change_type not in MAJOR_CHANGE_TYPES:
+            continue
+
+        box_w = max(4, c_max - c_min)
+        box_h = max(4, r_max - r_min)
+        norm_box = {
+            "x": round((c_min / mask.shape[1]) * 100.0, 2),
+            "y": round((r_min / mask.shape[0]) * 100.0, 2),
+            "w": round((box_w / mask.shape[1]) * 100.0, 2),
+            "h": round((box_h / mask.shape[0]) * 100.0, 2),
+        }
 
         # Extract spectral indices for this region if maps are provided
         spectral_profile = None
@@ -136,6 +143,8 @@ def polygonize_change_mask(
                 "area_px": area_px,
                 "area_m2": area_m2,
                 "area_sq_m": area_m2,
+                "pixel_bbox": [c_min, r_min, c_min + box_w, r_min + box_h],
+                "box_pct": norm_box,
                 "spectral_profile": spectral_profile,
             }
         }

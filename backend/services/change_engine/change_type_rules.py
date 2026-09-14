@@ -26,68 +26,91 @@ TYPE_WATER_EXPANSION = "Water-Extent Variation (expansion)"
 TYPE_DEMOLITION = "Demolition / Reversion"
 TYPE_UNCLASSIFIED = "Unclassified Structural Change"
 
+# User requirement: Only major anthropogenic / structural changes are marked
+MAJOR_CHANGE_TYPES = {
+    TYPE_CONSTRUCTION,
+    TYPE_ROAD_DEVELOPMENT,
+    TYPE_CLEARANCE,
+    TYPE_WATER_SHRINKAGE,
+    TYPE_WATER_EXPANSION,
+    TYPE_DEMOLITION,
+}
+
 VEGETATION_CLASSES = {CLASS_DENSE_VEGETATION, CLASS_MODERATE_VEGETATION}
 
 
 def lookup_change_type(before_class: str, after_class: str) -> str:
-    """Evaluates the transition matrix for a single pixel or region."""
+    """Evaluates the transition matrix for a single pixel or region.
+    
+    Strictly filters out non-major changes like seasonal grass sprouting or
+    intra-vegetation shifts (dense <-> sparse vegetation).
+    """
     if before_class == after_class:
         return "No Change"
 
-    # Intra-vegetation shifts (Dense <-> Moderate) are seasonal phenology
+    # User rule: "not mark the changes like spase vegetation dense vegetation like stuff"
+    # 1. Intra-vegetation shifts (Dense <-> Moderate/Sparse) are seasonal phenology
     if before_class in VEGETATION_CLASSES and after_class in VEGETATION_CLASSES:
         return "No Change"
 
-    # Both unclassified / transitional is No Change
+    # 2. Seasonal grass/sprouting on bare soil (Re-vegetation) is NOT a major change
+    if before_class == CLASS_BARE_SOIL and after_class in VEGETATION_CLASSES:
+        return "No Change"
+
+    # 3. Transitions between unclassified and vegetation are non-major
+    if (before_class == CLASS_UNCLASSIFIED and after_class in VEGETATION_CLASSES) or \
+       (before_class in VEGETATION_CLASSES and after_class == CLASS_UNCLASSIFIED):
+        return "No Change"
+
+    # 4. Both unclassified is No Change
     if before_class == CLASS_UNCLASSIFIED and after_class == CLASS_UNCLASSIFIED:
         return "No Change"
 
-    # Construction: Vegetation -> Built-up or Bare Soil -> Built-up
+    # --- MAJOR STRUCTURAL CHANGES ---
+    # Construction: Land/Bare Soil or Vegetation -> Built-up
     if (before_class in VEGETATION_CLASSES or before_class == CLASS_BARE_SOIL) and after_class == CLASS_BUILT_UP:
         return TYPE_CONSTRUCTION
 
-    # Clearance: Vegetation -> Bare Soil
+    # Clearance: Vegetation -> Bare Soil (excavation / site prep)
     if before_class in VEGETATION_CLASSES and after_class == CLASS_BARE_SOIL:
         return TYPE_CLEARANCE
 
-    # Water Shrinkage: Water -> Bare Soil or Vegetation
-    if before_class == CLASS_WATER and (after_class == CLASS_BARE_SOIL or after_class in VEGETATION_CLASSES):
+    # Water Shrinkage: Water -> Land
+    if before_class == CLASS_WATER and after_class in (CLASS_BARE_SOIL, CLASS_BUILT_UP):
         return TYPE_WATER_SHRINKAGE
 
-    # Water Expansion: Bare Soil or Vegetation -> Water
-    if (before_class == CLASS_BARE_SOIL or before_class in VEGETATION_CLASSES) and after_class == CLASS_WATER:
+    # Water Expansion: Land -> Water
+    if before_class in (CLASS_BARE_SOIL, CLASS_BUILT_UP) and after_class == CLASS_WATER:
         return TYPE_WATER_EXPANSION
 
-    # Demolition / Reversion: Built-up -> Vegetation or Bare Soil
+    # Demolition / Reversion: Built-up -> Bare Soil / Ground
     if before_class == CLASS_BUILT_UP and (after_class in VEGETATION_CLASSES or after_class == CLASS_BARE_SOIL):
         return TYPE_DEMOLITION
 
-    # Re-vegetation / Greening: Bare Soil -> Vegetation
-    if before_class == CLASS_BARE_SOIL and after_class in VEGETATION_CLASSES:
-        return "Re-vegetation / Greening"
-
-    # Contextual assignment for any mixed/transitional shifts
-    if after_class == CLASS_BUILT_UP:
+    # If transformed into built-up from any non-built class, classify as Construction
+    if after_class == CLASS_BUILT_UP and before_class != CLASS_BUILT_UP:
         return TYPE_CONSTRUCTION
-    if after_class == CLASS_BARE_SOIL:
-        return TYPE_CLEARANCE
-    if after_class in VEGETATION_CLASSES:
-        return "Re-vegetation / Greening"
-    if after_class == CLASS_WATER:
-        return TYPE_WATER_EXPANSION
 
-    return "Surface Transformation"
+    # If previously built-up and disappeared, classify as Demolition
+    if before_class == CLASS_BUILT_UP and after_class != CLASS_BUILT_UP:
+        return TYPE_DEMOLITION
+
+    # All other vegetation/subtle fluctuations are strictly No Change
+    return "No Change"
 
 
 def vectorized_change_type_lookup(
     before_classes: np.ndarray,
     after_classes: np.ndarray,
 ) -> np.ndarray:
-    """Vectorized transition matrix assignment for 1D or 2D arrays."""
+    """Vectorized transition matrix assignment for 1D or 2D arrays.
+    
+    Restricted strictly to major structural / anthropogenic changes.
+    """
     before = np.asarray(before_classes, dtype=object)
     after = np.asarray(after_classes, dtype=object)
 
-    output = np.full(before.shape, "Surface Transformation", dtype=object)
+    output = np.full(before.shape, "No Change", dtype=object)
 
     is_veg_before = (before == CLASS_DENSE_VEGETATION) | (before == CLASS_MODERATE_VEGETATION)
     is_veg_after = (after == CLASS_DENSE_VEGETATION) | (after == CLASS_MODERATE_VEGETATION)
@@ -97,42 +120,24 @@ def vectorized_change_type_lookup(
     is_bare_after = after == CLASS_BARE_SOIL
     is_water_before = before == CLASS_WATER
     is_water_after = after == CLASS_WATER
-    is_unclass_before = before == CLASS_UNCLASSIFIED
-    is_unclass_after = after == CLASS_UNCLASSIFIED
 
-    # Construction
+    # 1. Construction: Land/Bare Soil or Vegetation -> Built-up
     output[(is_veg_before | is_bare_before) & is_built_after] = TYPE_CONSTRUCTION
 
-    # Clearance
+    # 2. Clearance: Vegetation -> Bare Soil (major land clearing)
     output[is_veg_before & is_bare_after] = TYPE_CLEARANCE
 
-    # Re-vegetation / Greening
-    output[is_bare_before & is_veg_after] = "Re-vegetation / Greening"
+    # 3. Water Variation
+    output[is_water_before & (is_bare_after | is_built_after)] = TYPE_WATER_SHRINKAGE
+    output[(is_bare_before | is_built_before) & is_water_after] = TYPE_WATER_EXPANSION
 
-    # Water Shrinkage
-    output[is_water_before & (is_bare_after | is_veg_after)] = TYPE_WATER_SHRINKAGE
+    # 4. Demolition: Built-up -> Land
+    output[is_built_before & (is_bare_after | is_veg_after)] = TYPE_DEMOLITION
 
-    # Water Expansion
-    output[(is_bare_before | is_veg_before) & is_water_after] = TYPE_WATER_EXPANSION
-
-    # Demolition
-    output[is_built_before & (is_veg_after | is_bare_after)] = TYPE_DEMOLITION
-
-    # Intra-vegetation seasonal shifts are No Change
-    output[is_veg_before & is_veg_after] = "No Change"
-
-    # Both unclassified / transitional is No Change
-    output[is_unclass_before & is_unclass_after] = "No Change"
+    # 5. Any other new built-up is Construction
+    output[(output == "No Change") & is_built_after & (~is_built_before)] = TYPE_CONSTRUCTION
 
     # Identical classes remain No Change
-    output[before == after] = "No Change"
-
-    # Contextual assignment for remaining active transitions
-    is_still_generic = (output == "Surface Transformation") & (before != after)
-    output[is_still_generic & is_built_after] = TYPE_CONSTRUCTION
-    output[is_still_generic & is_bare_after] = TYPE_CLEARANCE
-    output[is_still_generic & is_veg_after] = "Re-vegetation / Greening"
-    output[is_still_generic & is_water_after] = TYPE_WATER_EXPANSION
     output[before == after] = "No Change"
 
     return output

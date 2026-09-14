@@ -41,6 +41,7 @@ from backend.services.change_engine.semantic_change_filter import (
 )
 from backend.services.change_engine.change_type_rules import (
     vectorized_change_type_lookup,
+    MAJOR_CHANGE_TYPES,
 )
 from backend.services.change_engine.vectorizer import (
     polygonize_change_mask,
@@ -52,18 +53,60 @@ from backend.services.change_engine.temporal_aggregator import (
 logger = logging.getLogger(__name__)
 
 
-def rgb_to_png_base64(rgb: np.ndarray, max_dim: int = 384) -> str:
+def draw_bounding_squares(base_img: Image.Image, boxes: Optional[List[Dict[str, Any]]]) -> Image.Image:
+    """Overlays high-contrast engineering bounding squares directly onto the image."""
+    if not boxes:
+        return base_img
+
+    from PIL import ImageDraw
+    img_out = base_img.copy().convert("RGBA")
+    draw = ImageDraw.Draw(img_out, "RGBA")
+    w, h = img_out.size
+
+    TYPE_COLORS = {
+        "Construction": (245, 158, 11, 255),       # Amber #f59e0b
+        "Road Development": (168, 85, 247, 255),   # Purple #a855f7
+        "Clearance": (244, 63, 94, 255),           # Rose #f43f5e
+        "Water-Extent Variation (shrinkage)": (6, 182, 212, 255), # Cyan #06b6d4
+        "Water-Extent Variation (expansion)": (6, 182, 212, 255),
+        "Demolition / Reversion": (251, 146, 60, 255),            # Orange #fb923c
+    }
+
+    for b in boxes:
+        c_type = b.get("change_type", "Construction")
+        color = TYPE_COLORS.get(c_type, (245, 158, 11, 255))
+        fill_color = (color[0], color[1], color[2], 40)
+
+        norm = b.get("box_pct", {})
+        if not norm:
+            continue
+        x0 = int(round((norm["x"] / 100.0) * w))
+        y0 = int(round((norm["y"] / 100.0) * h))
+        bw = max(6, int(round((norm["w"] / 100.0) * w)))
+        bh = max(6, int(round((norm["h"] / 100.0) * h)))
+        x1 = min(w - 1, x0 + bw)
+        y1 = min(h - 1, y0 + bh)
+
+        # Draw semi-transparent highlight fill and crisp 2px border
+        draw.rectangle([x0, y0, x1, y1], fill=fill_color, outline=color, width=2)
+
+    return img_out
+
+
+def rgb_to_png_base64(rgb: np.ndarray, max_dim: int = 384, boxes: Optional[List[Dict[str, Any]]] = None) -> str:
     """Encodes normalized uint8 (H, W, 3) RGB array to a base64 PNG data URL."""
     img = Image.fromarray(rgb.astype(np.uint8), mode="RGB")
     h, w = rgb.shape[:2]
     if h > max_dim or w > max_dim:
         img = img.resize((max_dim, max_dim), Image.Resampling.BILINEAR)
+    if boxes:
+        img = draw_bounding_squares(img, boxes)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def ndvi_to_png_base64(ndvi: np.ndarray, max_dim: int = 384) -> str:
+def ndvi_to_png_base64(ndvi: np.ndarray, max_dim: int = 384, boxes: Optional[List[Dict[str, Any]]] = None) -> str:
     """Maps continuous NDVI [-1.0, 1.0] to a standard colorized band map and base64 PNG.
     
     Ramp:
@@ -109,6 +152,8 @@ def ndvi_to_png_base64(ndvi: np.ndarray, max_dim: int = 384) -> str:
     img = Image.fromarray(rgba, mode="RGBA")
     if h > max_dim or w > max_dim:
         img = img.resize((max_dim, max_dim), Image.Resampling.BILINEAR)
+    if boxes:
+        img = draw_bounding_squares(img, boxes)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
@@ -338,10 +383,10 @@ class SequenceOrchestrator:
         # Step 9: Transition Matrix Lookup
         change_type_map = vectorized_change_type_lookup(class_before_map, class_after_map)
 
-        # CRITICAL USER RULE: Any pixel where surface is unchanged (change_type == "No Change"
-        # or class_before_map == class_after_map) MUST BE STRICTLY REMOVED from the verified mask
-        is_unchanged_surface = (change_type_map == "No Change") | (class_before_map == class_after_map)
-        surviving_mask = surviving_mask & (~is_unchanged_surface)
+        # CRITICAL USER RULE: Only major structural changes (Land to Construction, Road, Clearance, Demolition, Water)
+        # Never mark vegetation-only shifts ("sparse vegetation dense vegetation like stuff")
+        is_major_change = np.isin(change_type_map, list(MAJOR_CHANGE_TYPES))
+        surviving_mask = surviving_mask & is_major_change
 
         # Step 10: Vectorize to GeoJSON polygons with road morphology test & spectral sampling
         features = polygonize_change_mask(
@@ -381,10 +426,6 @@ class SequenceOrchestrator:
         }
 
         # Step 12: Generate Web-ready base64 PNG previews for all bands and masks
-        # CRITICAL USER REQUIREMENT:
-        # 1. "each pixel is coloued acc to the particular class it belon not just one colour for both after and before"
-        # 2. "and if both after and before have same colour pixel then remove that pixel as it represent no change"
-
         # Strictly eliminate any pixel where class_before_map == class_after_map (no change)
         is_same_pixel_class = (class_before_map == class_after_map)
         surviving_mask = surviving_mask & (~is_same_pixel_class)
@@ -397,15 +438,30 @@ class SequenceOrchestrator:
         filter_stats["verified_changes"] = changed_pixels
         filter_stats["false_positives_rejected"] = fp_rejected
 
+        # Collect major change boxes for drawing on After images
+        change_boxes = [
+            {
+                "id": i + 1,
+                "change_type": f["properties"]["change_type"],
+                "area_m2": f["properties"].get("area_m2", 0),
+                "box_pct": f["properties"].get("box_pct", {}),
+                "pixel_bbox": f["properties"].get("pixel_bbox", []),
+            }
+            for i, f in enumerate(features)
+            if f.get("properties", {}).get("change_type") in MAJOR_CHANGE_TYPES
+        ]
+
         # Per-pixel colorized land-cover maps for Before and After
         classified_b_png = classified_map_to_png_base64(class_before_map, mask=surviving_mask)
         classified_a_png = classified_map_to_png_base64(class_after_map, mask=surviving_mask)
 
-        # Standard band previews
+        # Standard band previews and annotated previews with change squares
         rgb_b_png = rgb_to_png_base64(data_b["rgb"])
         rgb_a_png = rgb_to_png_base64(data_a["rgb"])
+        rgb_a_annotated_png = rgb_to_png_base64(data_a["rgb"], boxes=change_boxes)
         ndvi_b_png = ndvi_to_png_base64(indices_b["ndvi"])
         ndvi_a_png = ndvi_to_png_base64(indices_a["ndvi"])
+        ndvi_a_annotated_png = ndvi_to_png_base64(indices_a["ndvi"], boxes=change_boxes)
         raw_mask_png = mask_to_png_base64(candidate_binary_mask, color=(6, 182, 212))
         filtered_mask_png = mask_to_png_base64(surviving_mask, color=(245, 158, 11))
 
@@ -454,8 +510,11 @@ class SequenceOrchestrator:
             "changed_pixels": changed_pixels,
             "rgb_before_url": rgb_b_png,
             "rgb_after_url": rgb_a_png,
+            "rgb_after_annotated_url": rgb_a_annotated_png,
             "ndvi_before_url": ndvi_b_png,
             "ndvi_after_url": ndvi_a_png,
+            "ndvi_after_annotated_url": ndvi_a_annotated_png,
+            "change_boxes": change_boxes,
             "binary_mask_url": raw_mask_png,
             "filtered_mask_url": filtered_mask_png,
             "classified_before_url": classified_b_png,
