@@ -107,13 +107,19 @@ function setupDrawerControls() {
   const expandBtn = document.getElementById("btn-expand-drawer");
   if (expandBtn && drawer) {
     expandBtn.addEventListener("click", () => {
-      drawer.classList.toggle("side-mode");
-      const isSide = drawer.classList.contains("side-mode");
+      drawer.classList.toggle("full-mode");
+      const isFull = drawer.classList.contains("full-mode");
       const icon = document.getElementById("expand-icon");
       const text = document.getElementById("expand-text");
-      if (icon) icon.textContent = isSide ? "⤢" : "🗗";
-      if (text) text.textContent = isSide ? "Full Studio" : "Side Panel";
+      if (icon) icon.textContent = isFull ? "🗗" : "⤢";
+      if (text) text.textContent = isFull ? "Dock to Side" : "Expand Studio";
       if (changeMap) changeMap.invalidateSize();
+      // Re-calculate NDVI trajectory plot after layout animation
+      setTimeout(() => {
+        if (currentSiteTimeline) {
+          renderAllEpochsNdviPlot(currentSiteTimeline.multi_temporal_stack, currentAnalysisData?.pairwise_transitions);
+        }
+      }, 360);
     });
   }
 
@@ -319,11 +325,11 @@ async function openMultiTemporalDrawer(siteKey) {
   const bridgeEpochCount = document.getElementById("bridge-epoch-count");
 
   drawer.classList.add("open");
-  drawer.classList.remove("side-mode");
+  drawer.classList.remove("full-mode");
   const icon = document.getElementById("expand-icon");
   const text = document.getElementById("expand-text");
-  if (icon) icon.textContent = "🗗";
-  if (text) text.textContent = "Side Panel";
+  if (icon) icon.textContent = "⤢";
+  if (text) text.textContent = "Expand Studio";
   if (siteKeyEl) siteKeyEl.textContent = siteKey;
   if (siteTitleEl) siteTitleEl.textContent = "Loading Multi-Temporal Series...";
   if (stackContainer) stackContainer.innerHTML = '<span style="color:#64748b; font-size:11px; padding:10px;">Loading epoch stack...</span>';
@@ -900,10 +906,12 @@ function renderAnalysisUI(data) {
 function drawNdviTrajectorySvg(svg, wrapper, tooltip, epochs, isSidebar = true) {
   if (!svg || !wrapper || !epochs || epochs.length === 0) return;
 
-  const viewW = 540;
-  const viewH = isSidebar ? 135 : 120;
-  const padLeft = 46;
-  const padRight = 30;
+  const rect = wrapper.getBoundingClientRect();
+  const domW = Math.round(rect.width) || 540;
+  const viewW = Math.max(380, domW);
+  const viewH = isSidebar ? 140 : 120;
+  const padLeft = 48;
+  const padRight = 32;
   const padTop = 18;
   const padBottom = 26;
   const plotW = viewW - padLeft - padRight;
@@ -921,6 +929,12 @@ function drawNdviTrajectorySvg(svg, wrapper, tooltip, epochs, isSidebar = true) 
 
   function toX(i) {
     if (epochs.length === 1) return padLeft + plotW / 2;
+    if (epochs.length === 2) {
+      // Keep two epochs within a comfortable, centered visual span
+      const visualSpan = Math.min(plotW, 320);
+      const startX = padLeft + (plotW - visualSpan) / 2;
+      return startX + i * visualSpan;
+    }
     return padLeft + (i / (epochs.length - 1)) * plotW;
   }
 
@@ -3063,4 +3077,16 @@ function switchChangeViewMode(mode) {
     }
   }
 }
+
+// Window resize auto-refresh for all-epochs NDVI trajectory charts
+let ndviResizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(ndviResizeTimer);
+  ndviResizeTimer = setTimeout(() => {
+    if (currentSiteTimeline) {
+      renderAllEpochsNdviPlot(currentSiteTimeline.multi_temporal_stack, currentSiteAnalysis?.pairwise);
+    }
+  }, 250);
+});
+
 

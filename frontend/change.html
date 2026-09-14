@@ -239,13 +239,14 @@
     /* ============================================================
        MULTI-TEMPORAL TIME-SERIES DRAWER STYLES & WORKBENCH MODES
        ============================================================ */
-    /* Expansive Full-Screen Studio Workbench Mode (Default on Open) */
+    /* Expansive Full-Screen Studio Workbench Mode vs Docked Side-Mode */
     #temporal-drawer {
       position: absolute;
       top: 0;
-      right: -100vw;
+      right: -750px;
       left: auto;
-      width: calc(100vw - 65px);
+      width: 700px;
+      max-width: 95vw;
       height: 100%;
       z-index: 1250;
       background: rgba(10, 15, 26, 0.98);
@@ -261,15 +262,22 @@
 
     #temporal-drawer.open {
       right: 0;
-      left: 65px;
-      width: calc(100vw - 65px);
+      left: auto;
+      width: 700px;
     }
 
-    /* Optional Docked Side-Mode if user prefers split view */
+    /* Optional Docked Side-Mode (explicit) */
     #temporal-drawer.side-mode {
       left: auto !important;
       right: 0 !important;
-      width: 720px !important;
+      width: 700px !important;
+    }
+
+    /* Expansive Full-Screen Studio Workbench Mode */
+    #temporal-drawer.open.full-mode {
+      left: 65px !important;
+      right: 0 !important;
+      width: calc(100vw - 65px) !important;
     }
 
     .drawer-expand-btn {
@@ -362,10 +370,28 @@
     .drawer-body {
       flex: 1;
       overflow-y: auto;
-      padding: 22px;
+      padding: 20px 24px;
       display: flex;
       flex-direction: column;
-      gap: 22px;
+      gap: 18px;
+    }
+
+    .drawer-left-col, .drawer-right-col {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      width: 100%;
+    }
+
+    /* When Fullscreen Studio Mode is active: 2-Column Responsive Dashboard Workbench */
+    #temporal-drawer.full-mode .drawer-body {
+      display: grid;
+      grid-template-columns: minmax(440px, 480px) minmax(620px, 1fr);
+      gap: 24px;
+      align-items: flex-start;
+      max-width: 1760px;
+      margin: 0 auto;
+      width: 100%;
     }
 
     .drawer-section {
@@ -548,6 +574,29 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 12px;
+      max-width: 100%;
+    }
+
+    .subinterval-grid .stack-thumb-box {
+      width: 100%;
+      aspect-ratio: 1;
+      max-height: 220px;
+      margin: 0 auto;
+      background: #030712;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .subinterval-grid .stack-thumb-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #030712;
+      display: block;
     }
 
     .inspector-card {
@@ -2299,6 +2348,7 @@
 
       <!-- Drawer Body -->
       <div class="drawer-body">
+        <div class="drawer-left-col">
 
         <!-- 1. Multi-Temporal Filmstrip Stack -->
         <div class="drawer-section">
@@ -2385,8 +2435,10 @@
             </div>
           </div>
         </div>
+        </div><!-- .drawer-left-col -->
 
         <!-- 4. Semantic-Verified Multi-Temporal Change Engine -->
+        <div class="drawer-right-col">
         <div class="drawer-section" id="section-change-engine">
           <div class="drawer-section-title" style="color: #38bdf8;">
             <span>⚡</span> Semantic-Verified Multi-Temporal Change Engine
@@ -2497,7 +2549,7 @@
 
                   <!-- Interactive SVG Canvas / Plot -->
                   <div class="all-epochs-chart-wrapper" id="all-epochs-chart-wrapper">
-                    <svg id="all-epochs-svg" class="all-epochs-svg" preserveAspectRatio="none" viewBox="0 0 540 135">
+                    <svg id="all-epochs-svg" class="all-epochs-svg" viewBox="0 0 540 135">
                       <!-- Populated dynamically by renderAllEpochsNdviPlot() -->
                     </svg>
 
@@ -2658,6 +2710,7 @@
             </div>
           </div>
         </div>
+        </div><!-- .drawer-right-col -->
 
       </div>
     </div>
@@ -2738,6 +2791,6 @@
   </div>
 
   <!-- Dedicated Studio Controller -->
-  <script src="/frontend/change.js?v=20260914_ndvi_v9"></script>
+  <script src="/frontend/change.js?v=20260914_ui_v10"></script>
 </body>
 </html>
