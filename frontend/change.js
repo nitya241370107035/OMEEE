@@ -289,33 +289,46 @@ function classifySpectralLandCover(ndvi, ndwi, ndbi) {
 }
 
 function getSpectralTransition(cB, cA) {
-  if (cB === cA) return "Unchanged Surface";
-  if (cB.includes("Water") && cA.includes("Water")) return "Unchanged Surface (Water Body)";
-  if (cB.includes("Vegetation") && cA.includes("Vegetation")) return "Seasonal Phenology (Unchanged)";
+  if (cB === cA) return `Stable Surface: ${cB} (Unchanged)`;
+  if (cB.includes("Water") && cA.includes("Water")) return "Stable Surface: Water Body (Unchanged)";
+  if (cB.includes("Vegetation") && cA.includes("Vegetation")) {
+    if (cB === cA) return `Stable Surface: ${cB} (Unchanged)`;
+    return `🌱 Seasonal Phenology (${cB} → ${cA})`;
+  }
 
-  // Ambiguous / Confusion zone transitions (suppressed)
+  // Ambiguous / Confusion zone transitions
   if (cB.includes("Confusion") || cA.includes("Confusion")) {
-    return "⚠️ Ambiguous (Built-up / Bare-land Confusion)";
+    return `⚠️ ${cB} → ${cA} (Spectral Ambiguity)`;
   }
 
-  if ((cB.includes("Bare Soil") || cB.includes("Land")) && cA.includes("Vegetation")) {
-    return "🌱 Seasonal Greening (Normal Land)";
+  // Water transitions: handles all cases where water appears or recedes
+  if (cB.includes("Water") && !cA.includes("Water")) {
+    return `💧 Water Shrinkage (Water → ${cA})`;
   }
+  if (!cB.includes("Water") && cA.includes("Water")) {
+    return `💧 Water Expansion (${cB} → Water)`;
+  }
+
+  // Construction
   if ((cB.includes("Vegetation") || cB.includes("Bare Soil") || cB.includes("Land")) && cA.includes("Built-up")) {
-    return "🏗️ Construction";
+    return `🏗️ Construction (${cB} → Built-up)`;
   }
+
+  // Clearance
   if (cB.includes("Vegetation") && (cA.includes("Bare Soil") || cA.includes("Land"))) {
-    return "🪓 Clearance";
+    return `🪓 Land Clearance (${cB} → ${cA})`;
   }
-  if (cB.includes("Water") && (cA.includes("Bare Soil") || cA.includes("Land") || cA.includes("Built-up"))) {
-    return "💧 Water Shrinkage";
+
+  // Greening / Growth
+  if ((cB.includes("Bare Soil") || cB.includes("Land")) && cA.includes("Vegetation")) {
+    return `🌱 Vegetation Growth (${cB} → ${cA})`;
   }
-  if (cA.includes("Water") && (cB.includes("Bare Soil") || cB.includes("Land") || cB.includes("Vegetation") || cB.includes("Built-up"))) {
-    return "💧 Water Expansion";
-  }
+
+  // Demolition / Reversion
   if (cB.includes("Built-up") && (cA.includes("Vegetation") || cA.includes("Bare Soil") || cA.includes("Land"))) {
-    return "🏚️ Demolition / Reversion";
+    return `🏚️ Demolition / Reversion (Built-up → ${cA})`;
   }
+
   return `${cB} → ${cA}`;
 }
 
@@ -2217,20 +2230,35 @@ function attachPlotSpectralHover(el, pair, pIdx) {
     const ndbiA = grid?.after?.ndbi?.[gy]?.[gx] ?? pair.spectral_profile?.after?.ndbi ?? -0.01;
     const clsA = grid?.after?.class?.[gy]?.[gx] || classifySpectralLandCover(ndviA, ndwiA, ndbiA);
 
-    let isChanged = grid?.verified ? (grid.verified[gy]?.[gx] > 0) : (clsB !== clsA);
-    let transStr = grid?.change_type?.[gy]?.[gx];
+    const changeBoxes = getMajorChangeBoxes(pair);
+    const inBox = (changeBoxes || []).find(b => {
+      const bp = b.box_pct;
+      if (!bp) return false;
+      const pctX = relX * 100.0;
+      const pctY = relY * 100.0;
+      return pctX >= bp.x && pctX <= (bp.x + bp.w) && pctY >= bp.y && pctY <= (bp.y + bp.h);
+    });
+
+    let isChanged = !!inBox || (grid?.verified ? (grid.verified[gy]?.[gx] > 0) : (clsB !== clsA));
+    let transStr = inBox ? (inBox.transition_label || inBox.change_type) : grid?.change_type?.[gy]?.[gx];
     if (clsB === "Water" && clsA === "Water") {
-      transStr = "Unchanged Surface (Water Body)";
+      transStr = "Stable Surface: Water Body (Unchanged)";
       isChanged = false;
     } else if (!transStr || transStr === "No Change" || ((transStr.includes("Demo") || transStr.includes("Built")) && (clsB.includes("Soil") || clsB.includes("Barren") || clsB === "Water" || ndviB >= 0.10))) {
       transStr = getSpectralTransition(clsB, clsA);
     }
     if ((transStr.includes("Construction") || transStr.includes("Built") || transStr.includes("Road")) && clsA === "Water") {
-      transStr = "Unchanged Surface (Water Body)";
+      transStr = "Stable Surface: Water Body (Unchanged)";
       isChanged = false;
     }
-    if (transStr.includes("Seasonal Greening") || transStr.includes("Seasonal Phenology") || clsB === clsA) {
+
+    const isStable = (clsB === clsA) || transStr.toLowerCase().includes("unchanged") || transStr.toLowerCase().includes("stable");
+
+    if (isStable) {
+      transStr = transStr.includes("Stable") ? transStr : `🟢 Stable Surface: ${clsB} (Unchanged)`;
       isChanged = false;
+    } else if (isChanged) {
+      transStr = transStr.startsWith("⚡") ? transStr : `⚡ Verified Change: ${transStr}`;
     }
 
     if (tooltip) {
@@ -2257,7 +2285,7 @@ function attachPlotSpectralHover(el, pair, pIdx) {
 
       if (tipTrans) {
         tipTrans.textContent = transStr;
-        tipTrans.style.color = isChanged ? "#fbbf24" : "#94a3b8";
+        tipTrans.style.color = isStable ? "#94a3b8" : (transStr.includes("Water") ? "#38bdf8" : (transStr.includes("Construction") || transStr.includes("Built") ? "#ef4444" : (transStr.includes("Clearance") ? "#f59e0b" : "#10b981")));
       }
     }
 
@@ -3554,32 +3582,49 @@ function attachCursorInspector(card, pair, idx) {
         classA = classifySpectralLandCover(ndviA, ndwiA, ndbiA);
       }
 
-      let trans = (serverChangeType && serverChangeType !== "No Change") ? serverChangeType : getSpectralTransition(classB, classA);
-      if (classB === "Water" && classA === "Water") {
-        trans = "Unchanged Surface (Water Body)";
+      // Check if current hovered pixel falls inside any detected change box
+      const changeBoxes = getMajorChangeBoxes(pair);
+      const pctX = relX * 100.0;
+      const pctY = relY * 100.0;
+      const matchedBox = (changeBoxes || []).find(b => {
+        const bp = b.box_pct;
+        if (!bp) return false;
+        return pctX >= bp.x && pctX <= (bp.x + bp.w) && pctY >= bp.y && pctY <= (bp.y + bp.h);
+      });
+
+      if (matchedBox) {
+        isVerified = true;
+        if (!serverChangeType || serverChangeType === "No Change") {
+          serverChangeType = matchedBox.transition_label || matchedBox.change_type;
+        }
       }
+
+      let trans = (serverChangeType && serverChangeType !== "No Change") ? serverChangeType : getSpectralTransition(classB, classA);
+
       if (trans.includes("Demolition") && (classB.includes("Bare Soil") || classB.includes("Land") || classB === "Water" || ndviB >= 0.10)) {
-        trans = classA.includes("Vegetation") ? "🌱 Seasonal Greening (Normal Land)" : "Unchanged Surface";
+        trans = classA.includes("Vegetation") ? `🌱 Vegetation Growth (${classB} → ${classA})` : `Stable Surface: ${classB} (Unchanged)`;
       }
       if ((trans.includes("Construction") || trans.includes("Built") || trans.includes("Road")) && classA === "Water") {
-        trans = "Unchanged Surface (Water Body)";
+        trans = "Stable Surface: Water Body (Unchanged)";
       }
-      const isUnchanged = (classB === classA) || trans === "No Change" || trans.includes("Unchanged") || trans.includes("Seasonal Phenology") || trans.includes("Seasonal Greening");
+
+      const isStable = (classB === classA) || trans.toLowerCase().includes("unchanged") || trans.toLowerCase().includes("stable");
 
       let displayTrans = trans;
       let transColor = "#fbbf24";
-      if (isUnchanged || !isVerified) {
-        if (classB === "Water" && classA === "Water") {
-          displayTrans = "🚫 Unchanged Surface (Water Body — Excluded from Verified Mask)";
-        } else if (trans.includes("Seasonal Greening")) {
-          displayTrans = "🌱 Seasonal Greening (Normal Land — Excluded)";
-        } else {
-          displayTrans = "🚫 Unchanged Surface (Excluded from Verified Mask)";
-        }
+
+      if (isStable) {
+        displayTrans = trans.includes("Stable") ? trans : `🟢 Stable Surface: ${classB} (Unchanged)`;
         transColor = "#94a3b8";
       } else {
-        displayTrans = "⚡ Verified: " + trans;
-        transColor = "#10b981";
+        // ACTUAL CHANGE: Show what changed!
+        if (isVerified) {
+          displayTrans = trans.startsWith("⚡") ? trans : `⚡ Verified Change: ${trans}`;
+          transColor = trans.includes("Water") ? "#38bdf8" : (trans.includes("Construction") || trans.includes("Built") ? "#ef4444" : (trans.includes("Clearance") ? "#f59e0b" : "#10b981"));
+        } else {
+          displayTrans = trans;
+          transColor = trans.includes("Water") ? "#38bdf8" : (trans.includes("Construction") || trans.includes("Built") ? "#f87171" : (trans.includes("Clearance") ? "#fbbf24" : "#34d399"));
+        }
       }
 
       // Update Card Live HUD Bar
