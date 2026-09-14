@@ -165,31 +165,40 @@ function setupLightboxControls() {
 
 function formatBoxItem(b) {
   const type = b.change_type || "Construction";
-  let color = "#f59e0b";
-  let fillColor = "rgba(245, 158, 11, 0.22)";
+
+  // Color scheme (user specified):
+  //   Built-up / Construction  → reddish (#ef4444)
+  //   Land Clearance           → light yellow (#fde047)
+  //   Road Development         → purple   (#a855f7)  [unchanged]
+  //   Water Variation          → cyan     (#06b6d4)  [unchanged]
+  //   Demolition / Reversion   → orange   (#fb923c)  [unchanged]
+  let color    = "#ef4444";
+  let fillColor = "rgba(239, 68, 68, 0.22)";
   let shortType = "Build";
 
   if (type.includes("Road")) {
-    color = "#a855f7";
+    color     = "#a855f7";
     fillColor = "rgba(168, 85, 247, 0.22)";
     shortType = "Road";
   } else if (type.includes("Clearance")) {
-    color = "#f43f5e";
-    fillColor = "rgba(244, 63, 94, 0.22)";
-    shortType = "Clear";
+    // Land clearance → light yellow
+    color     = "#fde047";
+    fillColor = "rgba(253, 224, 71, 0.22)";
+    shortType = "Land";
   } else if (type.includes("Water")) {
-    color = "#06b6d4";
+    color     = "#06b6d4";
     fillColor = "rgba(6, 182, 212, 0.22)";
     shortType = "Water";
   } else if (type.includes("Demolition")) {
-    color = "#fb923c";
+    color     = "#fb923c";
     fillColor = "rgba(251, 146, 60, 0.22)";
     shortType = "Demo";
-  } else if (type.includes("Construction")) {
-    color = "#f59e0b";
-    fillColor = "rgba(245, 158, 11, 0.22)";
-    shortType = "Build";
+  } else if (type.includes("Unclassified")) {
+    color     = "#6366f1";
+    fillColor = "rgba(99, 102, 241, 0.22)";
+    shortType = "Other";
   }
+  // Default (Construction) uses the reddish color set at top
 
   const box = b.box_pct || { x: 10, y: 10, w: 20, h: 20 };
   return {
@@ -201,6 +210,7 @@ function formatBoxItem(b) {
     area_m2: b.area_m2 || 0
   };
 }
+
 
 function getMajorChangeBoxes(pair) {
   if (!pair) return [];
@@ -2296,11 +2306,12 @@ function renderChangeTreeView(timeline, analysisData) {
       </div>
 
       <!-- High-Resolution Binary Change Mask Colored for After Surface -->
-      <div class="tree-classified-plot-wrap">
+      <div class="tree-classified-plot-wrap" style="position:relative;">
         ${classImgAfter ? 
           `<img src="${classImgAfter}" class="tree-classified-plot-img" id="img-class-after-${pIdx}" title="Click to view full-resolution After classification map" />` :
           `<canvas class="tree-classified-canvas" id="canvas-class-after-${pIdx}" title="High-resolution After Classified Change Mask"></canvas>`
         }
+        ${renderChangeSquaresHtml(pairChangeBoxes)}
       </div>
 
       <!-- Surface Footprint Multi-Class Legend -->
