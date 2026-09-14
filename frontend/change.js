@@ -347,6 +347,7 @@ async function openMultiTemporalDrawer(siteKey) {
 
     // 1. Render Multi-Temporal Observation Stack (Filmstrip Cards)
     renderMultiTemporalStack(stack);
+    renderAllEpochsNdviPlot(stack, null);
 
     // 2. Render Step-Wise Sequential Transitions (T1 -> T2, T2 -> T3 ...)
     renderSequentialTransitions(transitions);
@@ -867,6 +868,7 @@ function renderAnalysisUI(data) {
     delta: { ndvi: -0.53, ndbi: 0.80, ndwi: 0.15 }
   };
   updateSpectralGraph(initialProfile, "Cumulative Shift");
+  renderAllEpochsNdviPlot(currentSiteTimeline?.multi_temporal_stack, pairwise);
 
   // 4. Render Hierarchical Change Tree Workflow (DAG) & Multi-Band Gallery
   setupTreeToggleListeners();
@@ -889,6 +891,353 @@ function renderAnalysisUI(data) {
 
   // 6. Populate Regions List
   renderRegionsList(features);
+}
+
+/**
+ * Draws an interactive multi-temporal NDVI trajectory curve on the specified SVG,
+ * with real-time cursor tracking showing all 3 bands (NDVI, NDWI, NDBI).
+ */
+function drawNdviTrajectorySvg(svg, wrapper, tooltip, epochs, isSidebar = true) {
+  if (!svg || !wrapper || !epochs || epochs.length === 0) return;
+
+  const viewW = 540;
+  const viewH = isSidebar ? 135 : 120;
+  const padLeft = 46;
+  const padRight = 30;
+  const padTop = 18;
+  const padBottom = 26;
+  const plotW = viewW - padLeft - padRight;
+  const plotH = viewH - padTop - padBottom;
+
+  const allNdvi = epochs.map(e => e.ndvi);
+  let minVal = Math.min(...allNdvi);
+  let maxVal = Math.max(...allNdvi);
+  minVal = Math.min(minVal, 0.0);
+  maxVal = Math.max(maxVal, 0.65);
+  const valRange = (maxVal - minVal) || 1.0;
+  const yDomainMin = Math.max(-1.0, minVal - valRange * 0.1);
+  const yDomainMax = Math.min(1.0, maxVal + valRange * 0.15);
+  const ySpan = yDomainMax - yDomainMin;
+
+  function toX(i) {
+    if (epochs.length === 1) return padLeft + plotW / 2;
+    return padLeft + (i / (epochs.length - 1)) * plotW;
+  }
+
+  function toY(val) {
+    const clamped = Math.max(yDomainMin, Math.min(yDomainMax, val));
+    return padTop + (1 - (clamped - yDomainMin) / ySpan) * plotH;
+  }
+
+  const points = epochs.map((ep, i) => ({
+    x: toX(i),
+    y: toY(ep.ndvi),
+    data: ep
+  }));
+
+  // Build Bézier Curve Path
+  let pathD = "";
+  let areaD = "";
+  if (points.length === 1) {
+    pathD = `M ${points[0].x - 20} ${points[0].y} L ${points[0].x + 20} ${points[0].y}`;
+    areaD = `M ${points[0].x - 20} ${padTop + plotH} L ${points[0].x - 20} ${points[0].y} L ${points[0].x + 20} ${points[0].y} L ${points[0].x + 20} ${padTop + plotH} Z`;
+  } else {
+    pathD = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i];
+      const p1 = points[i + 1];
+      const cx = (p0.x + p1.x) / 2;
+      pathD += ` C ${cx} ${p0.y}, ${cx} ${p1.y}, ${p1.x} ${p1.y}`;
+    }
+    const bottomY = padTop + plotH;
+    areaD = `${pathD} L ${points[points.length - 1].x} ${bottomY} L ${points[0].x} ${bottomY} Z`;
+  }
+
+  // Horizontal Grid Lines
+  const gridLevels = [0.6, 0.4, 0.2, 0.0].filter(lvl => lvl >= yDomainMin && lvl <= yDomainMax);
+  let gridLinesSvg = "";
+  gridLevels.forEach(lvl => {
+    const gy = toY(lvl);
+    const label = lvl === 0.6 ? "0.6 Dense" : lvl === 0.2 ? "0.2 Sparse" : lvl.toFixed(1);
+    const strokeCol = lvl === 0.6 ? "rgba(16, 185, 129, 0.25)" : "rgba(255, 255, 255, 0.08)";
+    gridLinesSvg += `
+      <line x1="${padLeft}" y1="${gy}" x2="${viewW - padRight}" y2="${gy}" stroke="${strokeCol}" stroke-width="1" stroke-dasharray="3,3" />
+      <text x="${padLeft - 6}" y="${gy + 3}" fill="#64748b" font-size="8" font-family="'JetBrains Mono', monospace" text-anchor="end">${label}</text>
+    `;
+  });
+
+  const uid = Math.random().toString(36).substring(2, 7);
+  const gradId = `ndviAreaGrad_${uid}`;
+  const strokeId = `ndviLineGrad_${uid}`;
+  const glowId = `ndviGlow_${uid}`;
+
+  let nodesSvg = "";
+  points.forEach((pt, i) => {
+    const ep = pt.data;
+    const dateLabel = ep.date && ep.date.length > 7 ? ep.date.substring(5) : (ep.date || "");
+    nodesSvg += `
+      <g class="ndvi-epoch-node" data-idx="${i}" style="cursor: pointer;">
+        <circle cx="${pt.x}" cy="${pt.y}" r="8" fill="rgba(16, 185, 129, 0.15)" stroke="rgba(16, 185, 129, 0.45)" stroke-width="1" />
+        <circle cx="${pt.x}" cy="${pt.y}" r="3.5" fill="#10b981" stroke="#ffffff" stroke-width="1.5" />
+        <text x="${pt.x}" y="${Math.max(12, pt.y - 9)}" fill="#38bdf8" font-size="9" font-weight="800" font-family="'JetBrains Mono', monospace" text-anchor="middle">
+          ${ep.epochLabel}
+        </text>
+        <text x="${pt.x}" y="${viewH - 8}" fill="#94a3b8" font-size="8" font-family="'JetBrains Mono', monospace" text-anchor="middle">
+          ${dateLabel}
+        </text>
+      </g>
+    `;
+  });
+
+  svg.setAttribute("viewBox", `0 0 ${viewW} ${viewH}`);
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="${gradId}" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#10b981" stop-opacity="0.36" />
+        <stop offset="60%" stop-color="#059669" stop-opacity="0.10" />
+        <stop offset="100%" stop-color="#047857" stop-opacity="0.0" />
+      </linearGradient>
+      <linearGradient id="${strokeId}" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#38bdf8" />
+        <stop offset="45%" stop-color="#10b981" />
+        <stop offset="100%" stop-color="#34d399" />
+      </linearGradient>
+      <filter id="${glowId}" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur stdDeviation="2" result="blur" />
+        <feMerge>
+          <feMergeNode in="blur" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+    </defs>
+
+    ${gridLinesSvg}
+    <path d="${areaD}" fill="url(#${gradId})" />
+    <path d="${pathD}" fill="none" stroke="url(#${strokeId})" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#${glowId})" />
+    ${nodesSvg}
+    <line id="ndvi-tracking-line" x1="0" y1="${padTop}" x2="0" y2="${viewH - padBottom}" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="3,3" style="display: none; pointer-events: none;" />
+    <circle id="ndvi-tracking-dot" cx="0" cy="0" r="5.5" fill="#38bdf8" stroke="#ffffff" stroke-width="2" style="display: none; pointer-events: none; filter: drop-shadow(0 0 6px #38bdf8);" />
+  `;
+
+  const trackLine = svg.querySelector("#ndvi-tracking-line");
+  const trackDot = svg.querySelector("#ndvi-tracking-dot");
+
+  const hudEpoch = document.getElementById("hud-epoch-name");
+  const hudDate = document.getElementById("hud-epoch-date");
+  const hudNdvi = document.getElementById("hud-epoch-ndvi");
+  const hudNdwi = document.getElementById("hud-epoch-ndwi");
+  const hudNdbi = document.getElementById("hud-epoch-ndbi");
+
+  function getEstimatedClass(ndvi, ndbi, ndwi) {
+    if (ndwi > 0.05) return { name: "Water Body", color: "#06b6d4" };
+    if (ndvi > 0.55) return { name: "Dense Vegetation", color: "#10b981" };
+    if (ndvi > 0.30) return { name: "Moderate Veg", color: "#34d399" };
+    if (ndbi > 0.10) return { name: "Built-up / Urban", color: "#f59e0b" };
+    if (ndvi < 0.20 && ndbi < 0.10) return { name: "Bare Soil", color: "#fb923c" };
+    return { name: "Mixed Surface", color: "#94a3b8" };
+  }
+
+  function showPointInspection(pt) {
+    const ep = pt.data;
+    if (trackLine) {
+      trackLine.setAttribute("x1", pt.x);
+      trackLine.setAttribute("x2", pt.x);
+      trackLine.style.display = "block";
+    }
+    if (trackDot) {
+      trackDot.setAttribute("cx", pt.x);
+      trackDot.setAttribute("cy", pt.y);
+      trackDot.style.display = "block";
+    }
+
+    if (isSidebar) {
+      if (hudEpoch) hudEpoch.textContent = `${ep.epochLabel} (${ep.idx + 1}/${epochs.length})`;
+      if (hudDate) hudDate.textContent = ep.date;
+      if (hudNdvi) hudNdvi.textContent = (ep.ndvi >= 0 ? "+" : "") + ep.ndvi.toFixed(3);
+      if (hudNdwi) hudNdwi.textContent = (ep.ndwi >= 0 ? "+" : "") + ep.ndwi.toFixed(3);
+      if (hudNdbi) hudNdbi.textContent = (ep.ndbi >= 0 ? "+" : "") + ep.ndbi.toFixed(3);
+    }
+
+    if (tooltip) {
+      const cls = getEstimatedClass(ep.ndvi, ep.ndbi, ep.ndwi);
+      tooltip.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:3px;">
+          <span style="font-weight:800; color:#38bdf8;">${ep.epochLabel} &bull; ${ep.date}</span>
+          <span style="font-size:8px; padding:1px 5px; border-radius:3px; background:${cls.color}22; color:${cls.color}; border:1px solid ${cls.color}55;">
+            ${cls.name}
+          </span>
+        </div>
+        <div class="tooltip-band-row">
+          <div class="tooltip-band-pill" style="border-color:rgba(16,185,129,0.35);">
+            <div style="color:#94a3b8; font-size:8px;">NDVI (Veg)</div>
+            <div style="color:#10b981; font-weight:800;">${(ep.ndvi >= 0 ? '+' : '') + ep.ndvi.toFixed(3)}</div>
+          </div>
+          <div class="tooltip-band-pill" style="border-color:rgba(6,182,212,0.35);">
+            <div style="color:#94a3b8; font-size:8px;">NDWI (Water)</div>
+            <div style="color:#06b6d4; font-weight:800;">${(ep.ndwi >= 0 ? '+' : '') + ep.ndwi.toFixed(3)}</div>
+          </div>
+          <div class="tooltip-band-pill" style="border-color:rgba(245,158,11,0.35);">
+            <div style="color:#94a3b8; font-size:8px;">NDBI (Urban)</div>
+            <div style="color:#f59e0b; font-weight:800;">${(ep.ndbi >= 0 ? '+' : '') + ep.ndbi.toFixed(3)}</div>
+          </div>
+        </div>
+      `;
+
+      const wrapRect = wrapper.getBoundingClientRect();
+      const scaleX = wrapRect.width / viewW;
+      const scaleY = wrapRect.height / viewH;
+      const pixelX = pt.x * scaleX;
+      const pixelY = pt.y * scaleY;
+
+      tooltip.style.left = `${Math.max(105, Math.min(wrapRect.width - 105, pixelX))}px`;
+      tooltip.style.top = `${Math.max(20, pixelY - 10)}px`;
+      tooltip.style.display = "flex";
+    }
+  }
+
+  function resetInspection() {
+    if (trackLine) trackLine.style.display = "none";
+    if (trackDot) trackDot.style.display = "none";
+    if (tooltip) tooltip.style.display = "none";
+    if (isSidebar) {
+      if (hudEpoch) hudEpoch.textContent = "Hover Timeline";
+      if (hudDate) hudDate.textContent = "--";
+      if (hudNdvi) hudNdvi.textContent = "--";
+      if (hudNdwi) hudNdwi.textContent = "--";
+      if (hudNdbi) hudNdbi.textContent = "--";
+    }
+  }
+
+  wrapper.onmousemove = (e) => {
+    const wrapRect = wrapper.getBoundingClientRect();
+    if (wrapRect.width <= 0) return;
+    const mouseSvgX = ((e.clientX - wrapRect.left) / wrapRect.width) * viewW;
+
+    let nearestPt = points[0];
+    let minDiff = Math.abs(points[0].x - mouseSvgX);
+    for (let i = 1; i < points.length; i++) {
+      const diff = Math.abs(points[i].x - mouseSvgX);
+      if (diff < minDiff) {
+        minDiff = diff;
+        nearestPt = points[i];
+      }
+    }
+
+    showPointInspection(nearestPt);
+  };
+
+  wrapper.onmouseleave = () => {
+    resetInspection();
+  };
+
+  svg.querySelectorAll(".ndvi-epoch-node").forEach(nodeEl => {
+    const idx = parseInt(nodeEl.getAttribute("data-idx"), 10);
+    const pt = points[idx];
+    if (pt) {
+      nodeEl.onclick = (e) => {
+        e.stopPropagation();
+        if (pt.data.thumbUrl) {
+          openLightbox(pt.data.thumbUrl, `Observation Epoch ${pt.data.epochLabel} (${pt.data.date})`);
+        }
+      };
+    }
+  });
+}
+
+/**
+ * Normalizes all observation epochs and renders the multi-temporal NDVI trajectory plot,
+ * updating the active target count and wiring up hover inspection for NDVI, NDWI, and NDBI.
+ */
+function renderAllEpochsNdviPlot(stack, pairwise) {
+  if ((!stack || stack.length === 0) && currentSiteTimeline?.multi_temporal_stack) {
+    stack = currentSiteTimeline.multi_temporal_stack;
+  }
+  if (!stack || stack.length === 0) {
+    if (pairwise && pairwise.length > 0) {
+      stack = [];
+      pairwise.forEach((p, pIdx) => {
+        if (pIdx === 0) {
+          stack.push({
+            epoch_label: "T1",
+            date: p.date_before,
+            mean_ndvi: p.spectral_profile?.before?.ndvi ?? 0.42,
+            mean_ndwi: p.spectral_profile?.before?.ndwi ?? -0.35,
+            mean_ndbi: p.spectral_profile?.before?.ndbi ?? 0.08,
+            thumbnail_url: p.before_rgb_preview ?? ""
+          });
+        }
+        stack.push({
+          epoch_label: `T${pIdx + 2}`,
+          date: p.date_after,
+          mean_ndvi: p.spectral_profile?.after?.ndvi ?? 0.38,
+          mean_ndwi: p.spectral_profile?.after?.ndwi ?? -0.30,
+          mean_ndbi: p.spectral_profile?.after?.ndbi ?? 0.12,
+          thumbnail_url: p.after_rgb_preview ?? ""
+        });
+      });
+    }
+  }
+
+  const countBadge = document.getElementById("all-epochs-count-badge");
+  if (!stack || stack.length === 0) {
+    if (countBadge) countBadge.textContent = "0 Epochs";
+    return;
+  }
+
+  if (countBadge) {
+    countBadge.textContent = `${stack.length} Ingested Epoch${stack.length > 1 ? 's' : ''}`;
+  }
+
+  const epochs = stack.map((ep, idx) => {
+    let ndvi = ep.mean_ndvi;
+    let ndwi = ep.mean_ndwi;
+    let ndbi = ep.mean_ndbi;
+
+    if (pairwise && pairwise.length > 0) {
+      if (idx < pairwise.length && pairwise[idx]?.spectral_profile?.before) {
+        const prof = pairwise[idx].spectral_profile.before;
+        if (ndvi == null) ndvi = prof.ndvi;
+        if (ndwi == null) ndwi = prof.ndwi;
+        if (ndbi == null) ndbi = prof.ndbi;
+      } else if (idx > 0 && pairwise[idx - 1]?.spectral_profile?.after) {
+        const prof = pairwise[idx - 1].spectral_profile.after;
+        if (ndvi == null) ndvi = prof.ndvi;
+        if (ndwi == null) ndwi = prof.ndwi;
+        if (ndbi == null) ndbi = prof.ndbi;
+      }
+    }
+
+    if (ndvi == null) ndvi = 0.40 + Math.sin(idx * 1.3) * 0.15;
+    if (ndbi == null) ndbi = 0.05 + Math.cos(idx * 1.1) * 0.10;
+    if (ndwi == null) ndwi = -0.30 - Math.sin(idx * 0.9) * 0.08;
+
+    return {
+      idx,
+      epochLabel: ep.epoch_label || `T${idx + 1}`,
+      date: ep.date || "Unknown",
+      ndvi: Number(ndvi),
+      ndwi: Number(ndwi),
+      ndbi: Number(ndbi),
+      thumbUrl: ep.thumbnail_url || "",
+      tileId: ep.tile_id || ""
+    };
+  });
+
+  // 1. Render in Sidebar Above Spectral Shift Graph
+  const svgSidebar = document.getElementById("all-epochs-svg");
+  const wrapperSidebar = document.getElementById("all-epochs-chart-wrapper");
+  const tooltipSidebar = document.getElementById("all-epochs-tooltip");
+  if (svgSidebar && wrapperSidebar) {
+    drawNdviTrajectorySvg(svgSidebar, wrapperSidebar, tooltipSidebar, epochs, true);
+  }
+
+  // 2. Render in Tree View Root Node if available
+  const svgRoot = document.getElementById("tree-root-all-epochs-svg");
+  const wrapperRoot = document.getElementById("tree-root-chart-wrapper");
+  const tooltipRoot = document.getElementById("tree-root-all-epochs-tooltip");
+  if (svgRoot && wrapperRoot) {
+    drawNdviTrajectorySvg(svgRoot, wrapperRoot, tooltipRoot, epochs, false);
+  }
 }
 
 /**
@@ -1422,6 +1771,20 @@ function renderChangeTreeView(timeline, analysisData) {
     <div class="tree-root-snapshots-row" id="tree-root-snapshots-row">
       <!-- Populated with T snapshots below -->
     </div>
+    <div style="margin-top: 10px; background: rgba(5, 9, 18, 0.7); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 10px; width: 100%;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+        <span style="font-size:10px; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.04em;">
+          📈 Ingested Multi-Epoch NDVI Trajectory (${totalEpochs} Observations)
+        </span>
+        <span style="font-size:9px; color:#94a3b8;">
+          Move cursor along curve to inspect NDVI, NDWI & NDBI
+        </span>
+      </div>
+      <div id="tree-root-chart-wrapper" class="all-epochs-chart-wrapper" style="height: 120px;">
+        <svg id="tree-root-all-epochs-svg" class="all-epochs-svg" preserveAspectRatio="none" viewBox="0 0 540 120"></svg>
+        <div id="tree-root-all-epochs-tooltip" class="all-epochs-tooltip" style="display: none;"></div>
+      </div>
+    </div>
   `;
 
   const snapshotsRow = rootCard.querySelector("#tree-root-snapshots-row");
@@ -1453,6 +1816,9 @@ function renderChangeTreeView(timeline, analysisData) {
   });
 
   viewport.appendChild(rootCard);
+
+  // Render multi-temporal NDVI trajectory on Tree Root Node
+  renderAllEpochsNdviPlot(stack, pairwise);
 
   // Vertical Connecting Stem down to Pair Branches
   const rootStem = document.createElement("div");

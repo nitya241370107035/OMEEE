@@ -1398,6 +1398,114 @@
     }
 
     /* ============================================================
+       MULTI-TEMPORAL ALL-EPOCHS NDVI TRAJECTORY & 3-BAND INSPECTOR
+       ============================================================ */
+    .all-epochs-ndvi-section {
+      background: linear-gradient(180deg, rgba(8, 14, 28, 0.95), rgba(5, 9, 18, 0.98));
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: relative;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      margin-bottom: 8px;
+    }
+
+    .all-epochs-ndvi-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .all-epochs-hover-hud {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 6px;
+      background: rgba(11, 16, 30, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 10px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .hud-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .hud-label {
+      color: #94a3b8;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+
+    .hud-val {
+      font-weight: 800;
+      color: #f1f5f9;
+    }
+
+    .all-epochs-chart-wrapper {
+      width: 100%;
+      height: 135px;
+      position: relative;
+      background: #030712;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: crosshair;
+    }
+
+    .all-epochs-svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .all-epochs-tooltip {
+      position: absolute;
+      pointer-events: none;
+      background: rgba(11, 17, 32, 0.96);
+      backdrop-filter: blur(12px);
+      border: 1px solid #38bdf8;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85), 0 0 16px rgba(56, 189, 248, 0.35);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 10px;
+      color: #f8fafc;
+      z-index: 100;
+      min-width: 200px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      transform: translate(-50%, -115%);
+      transition: opacity 0.15s ease, transform 0.1s ease;
+    }
+
+    .tooltip-band-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      text-align: center;
+      margin-top: 2px;
+    }
+
+    .tooltip-band-pill {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 4px;
+      padding: 3px 4px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    /* ============================================================
        PHASE 1: CHANGE DETECTION TREE WORKFLOW STYLES
        ============================================================ */
     .tree-view-toggle-bar {
@@ -2349,7 +2457,56 @@
                     Active Target: Site Mean
                   </span>
                 </div>
-                <div style="font-size: 10px; color: #94a3b8; line-height: 1.3;">
+                <!-- Multi-Temporal All-Epochs NDVI Trajectory Plot & Multi-Band Inspector -->
+                <div class="all-epochs-ndvi-section" id="all-epochs-ndvi-section">
+                  <div class="all-epochs-ndvi-header">
+                    <div style="display:flex; align-items:center; gap:6px;">
+                      <span style="font-size:12px;">📈</span>
+                      <span style="font-size:10px; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.05em;">
+                        All Observations NDVI Trajectory
+                      </span>
+                    </div>
+                    <span class="tag-badge" id="all-epochs-count-badge" style="font-size:9px; color:#10b981; border-color:rgba(16,185,129,0.4);">
+                      -- Epochs
+                    </span>
+                  </div>
+
+                  <!-- Live Cursor Multi-Band HUD Ribbon (updates on cursor move across timeline) -->
+                  <div class="all-epochs-hover-hud" id="all-epochs-hover-hud">
+                    <div class="hud-item epoch">
+                      <span class="hud-label">EPOCH:</span>
+                      <span class="hud-val" id="hud-epoch-name">Hover Timeline</span>
+                    </div>
+                    <div class="hud-item date">
+                      <span class="hud-label">DATE:</span>
+                      <span class="hud-val" id="hud-epoch-date">--</span>
+                    </div>
+                    <div class="hud-item ndvi">
+                      <span class="hud-label">🌿 NDVI:</span>
+                      <span class="hud-val" id="hud-epoch-ndvi" style="color:#10b981;">--</span>
+                    </div>
+                    <div class="hud-item ndwi">
+                      <span class="hud-label">💧 NDWI:</span>
+                      <span class="hud-val" id="hud-epoch-ndwi" style="color:#06b6d4;">--</span>
+                    </div>
+                    <div class="hud-item ndbi">
+                      <span class="hud-label">🏗️ NDBI:</span>
+                      <span class="hud-val" id="hud-epoch-ndbi" style="color:#f59e0b;">--</span>
+                    </div>
+                  </div>
+
+                  <!-- Interactive SVG Canvas / Plot -->
+                  <div class="all-epochs-chart-wrapper" id="all-epochs-chart-wrapper">
+                    <svg id="all-epochs-svg" class="all-epochs-svg" preserveAspectRatio="none" viewBox="0 0 540 135">
+                      <!-- Populated dynamically by renderAllEpochsNdviPlot() -->
+                    </svg>
+
+                    <!-- Floating Tooltip Card (Follows cursor over the plot) -->
+                    <div id="all-epochs-tooltip" class="all-epochs-tooltip" style="display: none;"></div>
+                  </div>
+                </div>
+
+                <div style="font-size: 10px; color: #94a3b8; line-height: 1.3; margin-top: 4px;">
                   Quantifies land-cover transition by plotting Before (<span style="color:#60a5fa;">T1</span>) vs After (<span style="color:#34d399;">T2</span>) indices over changed pixels:
                 </div>
 
@@ -2581,6 +2738,6 @@
   </div>
 
   <!-- Dedicated Studio Controller -->
-  <script src="/frontend/change.js?v=20260913_tree_v8"></script>
+  <script src="/frontend/change.js?v=20260914_ndvi_v9"></script>
 </body>
 </html>
