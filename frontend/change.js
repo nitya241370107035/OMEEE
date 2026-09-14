@@ -377,61 +377,60 @@ function getFullWaterShrinkageBox(pair) {
 
 function getMajorChangeBoxes(pair) {
   if (!pair) return [];
+
+  // --- PRIMARY PATH: backend-computed change_boxes ---
   if (pair.change_boxes && pair.change_boxes.length > 0) {
-    return pair.change_boxes
-      .filter(b => {
-        const type = (b.change_type || "").toLowerCase();
-        const trans = (b.transition_label || "").toLowerCase();
+    // Filter out obvious false-positives
+    let filtered = pair.change_boxes.filter(b => {
+      const type = (b.change_type || "").toLowerCase();
+      const trans = (b.transition_label || "").toLowerCase();
 
-        // 1. Discard false demolition where Before was actually normal land
-        if (type.includes("demo") || trans.includes("built-up → ground")) {
-          const bProf = b.spectral_profile?.before || pair.spectral_profile?.before;
-          if (bProf && (bProf.ndvi != null && bProf.ndvi >= 0.10)) {
-            return false;
-          }
-          if (bProf && (bProf.ndbi < 0.10 || (bProf.ndvi != null && bProf.ndvi >= bProf.ndbi))) {
-            return false;
-          }
-          const bCls = (b.before_class || "").toLowerCase();
-          if (bCls.includes("soil") || bCls.includes("ground") || bCls.includes("barren") || bCls.includes("land")) {
-            return false;
-          }
+      // 1. Discard false demolition where Before was actually normal land
+      if (type.includes("demo") || trans.includes("built-up → ground")) {
+        const bProf = b.spectral_profile?.before || pair.spectral_profile?.before;
+        if (bProf && (bProf.ndvi != null && bProf.ndvi >= 0.10)) return false;
+        if (bProf && (bProf.ndbi < 0.10 || (bProf.ndvi != null && bProf.ndvi >= bProf.ndbi))) return false;
+        const bCls = (b.before_class || "").toLowerCase();
+        if (bCls.includes("soil") || bCls.includes("ground") || bCls.includes("barren") || bCls.includes("land")) return false;
+      }
+
+      // 2. Discard false construction / road where After is actually WATER!
+      if (type.includes("construct") || type.includes("road") || trans.includes("built-up") || trans.includes("road")) {
+        const bCls = (b.before_class || "").toLowerCase();
+        const aCls = (b.after_class || "").toLowerCase();
+        if (bCls.includes("water") && aCls.includes("water")) return false;
+        if (aCls.includes("water")) return false;
+        let aNdwi = b.spectral_profile?.after?.ndwi;
+        if (aNdwi == null && pair.cursor_sample_grid?.after?.ndwi && b.box_pct) {
+          const sz = pair.cursor_sample_grid.grid_size || 64;
+          const midR = Math.min(sz - 1, Math.max(0, Math.floor(((b.box_pct.y + b.box_pct.h / 2) / 100) * sz)));
+          const midC = Math.min(sz - 1, Math.max(0, Math.floor(((b.box_pct.x + b.box_pct.w / 2) / 100) * sz)));
+          aNdwi = pair.cursor_sample_grid.after.ndwi[midR]?.[midC];
         }
+        if (aNdwi != null && aNdwi > 0.15) return false;
+      }
 
-        // 2. Discard false construction / road where After is actually WATER!
-        if (type.includes("construct") || type.includes("road") || trans.includes("built-up") || trans.includes("road")) {
-          const bCls = (b.before_class || "").toLowerCase();
-          const aCls = (b.after_class || "").toLowerCase();
-          if (bCls.includes("water") && aCls.includes("water")) return false;
-          if (aCls.includes("water")) return false;
-
-          let aNdwi = b.spectral_profile?.after?.ndwi;
-          let aNdvi = b.spectral_profile?.after?.ndvi;
-          if (aNdwi == null && pair.cursor_sample_grid?.after?.ndwi && b.box_pct) {
-            const sz = pair.cursor_sample_grid.grid_size || 64;
-            const midR = Math.min(sz - 1, Math.max(0, Math.floor(((b.box_pct.y + b.box_pct.h / 2) / 100) * sz)));
-            const midC = Math.min(sz - 1, Math.max(0, Math.floor(((b.box_pct.x + b.box_pct.w / 2) / 100) * sz)));
-            aNdwi = pair.cursor_sample_grid.after.ndwi[midR]?.[midC];
-            aNdvi = pair.cursor_sample_grid.after.ndvi[midR]?.[midC];
-          }
-          if (aNdwi != null && aNdwi > 0.15) return false;
-        }
-
-        return true;
-      })
-      .map(b => formatBoxItem(b))
+      return true;
+    }).map(b => formatBoxItem(b))
       .sort((a, b) => (b.area_m2 || 0) - (a.area_m2 || 0));
 
+    // Overlay the full-extent water-shrinkage envelope computed from the cursor grid
+    // (this replaces any fragmented/small water boxes from the backend)
     const fullShrink = getFullWaterShrinkageBox(pair);
     if (fullShrink) {
-      const nonWater = pair.change_boxes.filter(b => !(b.change_type || "").toLowerCase().includes("water") && !(b.transition_label || "").toLowerCase().includes("water"));
+      const nonWater = filtered.filter(b =>
+        !(b.change_type || "").toLowerCase().includes("water") &&
+        !(b.transition_label || "").toLowerCase().includes("water")
+      );
       return [fullShrink, ...nonWater].slice(0, 8);
     }
-    return pair.change_boxes.slice(0, 8);
+
+    return filtered.slice(0, 8);
   }
 
+  // --- FALLBACK PATH: derive from change_geojson features ---
   const features = pair.change_geojson?.features || [];
-  const boxes = [];
+  let boxes = [];
 
   if (features.length > 0) {
     // 1. Calculate site coordinate bounding envelope across all features
@@ -636,10 +635,13 @@ function getMajorChangeBoxes(pair) {
     }
   }
 
-  // 4. Water shrinkage full envelope check
+  // 4. Water shrinkage full envelope check (always replaces fragmented water boxes)
   const fullShrink = getFullWaterShrinkageBox(pair);
   if (fullShrink) {
-    const nonWater = boxes.filter(b => !(b.change_type || "").toLowerCase().includes("water") && !(b.transition_label || "").toLowerCase().includes("water"));
+    const nonWater = boxes.filter(b =>
+      !(b.change_type || "").toLowerCase().includes("water") &&
+      !(b.transition_label || "").toLowerCase().includes("water")
+    );
     boxes = [fullShrink, ...nonWater];
   }
 
